@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import ReactMarkdown from 'react-markdown';
-import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare } from 'lucide-react';
+import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Key } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import Auth from './Auth';
 import ApiKeySetup from './ApiKeySetup';
@@ -274,6 +274,7 @@ const TaxAssistant: React.FC = () => {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [typingMessage, setTypingMessage] = useState<Message | null>(null);
   const [textareaHeight, setTextareaHeight] = useState('56px');
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestTimestamps = useRef<number[]>([]);
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -302,12 +303,11 @@ const TaxAssistant: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!supabase) return;
-    
     const checkAuthAndApiKey = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         setIsAuthenticated(!!session);
+        setUser(session?.user ?? null);
         
         if (session?.user) {
           const { data: apiKeyData, error: apiKeyError } = await supabase
@@ -318,6 +318,7 @@ const TaxAssistant: React.FC = () => {
             
           if (!apiKeyError && apiKeyData?.gemini_key) {
             setHasApiKey(true);
+            setApiKey(apiKeyData.gemini_key);
             window.__GEMINI_API_KEY = apiKeyData.gemini_key;
           }
         }
@@ -330,25 +331,6 @@ const TaxAssistant: React.FC = () => {
     };
 
     checkAuthAndApiKey();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setIsAuthenticated(!!session);
-      if (session?.user) {
-        const { data: apiKeyData } = await supabase
-          .from('api_keys')
-          .select('gemini_key')
-          .eq('user_id', session.user.id)
-          .maybeSingle();
-          
-        setHasApiKey(!!apiKeyData?.gemini_key);
-      } else {
-        setHasApiKey(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -521,7 +503,7 @@ const TaxAssistant: React.FC = () => {
       }
 
       if (useGemini) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey || GEMINI_API_KEY}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -757,6 +739,62 @@ const TaxAssistant: React.FC = () => {
     }, 300);
   };
 
+  const handleApiKeySetup = () => {
+    navigate('/api-key-setup', { state: { returnUrl: '/tax-assistant' } });
+  };
+
+  const renderHeader = () => (
+    <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md">
+      <div className="flex items-center justify-between p-4 max-w-full overflow-x-auto">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => setShowHistory(true)}
+            className="md:hidden p-2 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0"
+          >
+            <Menu size={24} />
+          </button>
+          <div className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
+            <Brain className="text-white" size={24} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold truncate">Tax Assistant AI</h1>
+            <p className="text-sm text-white/80 truncate">{user?.email}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 ml-4">
+          <button
+            onClick={handleApiKeySetup}
+            className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <Key size={20} />
+            <span className="hidden sm:inline">API Settings</span>
+          </button>
+          <Link
+            to="/"
+            className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <Home size={20} />
+            <span className="hidden sm:inline">Home</span>
+          </Link>
+          <button
+            onClick={clearChat}
+            className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-300"
+            title="Clear all chats"
+          >
+            <Trash2 size={20} />
+          </button>
+          <button
+            onClick={handleSignOut}
+            className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-300"
+            title="Sign out"
+          >
+            <LogOut size={20} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   if (isCheckingAuth || isCheckingApiKey) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -825,7 +863,6 @@ const TaxAssistant: React.FC = () => {
                       currentChatId === chat.id ? 'bg-white/10' : ''
                     }`}
                   >
-                    
                     <div className="flex items-start gap-3">
                       <MessageSquare size={20} className="text-white/70" />
                       <div className="flex-grow min-w-0 pr-8">
@@ -911,48 +948,7 @@ const TaxAssistant: React.FC = () => {
       )}
 
       <div className="flex-1 flex flex-col h-screen max-w-full">
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md">
-          <div className="flex items-center justify-between p-4 max-w-full overflow-x-auto">
-            <div className="flex items-center gap-3 min-w-0">
-              <button
-                onClick={() => setShowHistory(true)}
-                className="md:hidden p-2 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0"
-              >
-                <Menu size={24} />
-              </button>
-              <div className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
-                <Brain className="text-white" size={24} />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-xl font-bold truncate">Tax Assistant AI</h1>
-                <p className="text-sm text-white/80 truncate">{user?.email}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 ml-4">
-              <Link
-                to="/"
-                className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-              >
-                <Home size={20} />
-                <span className="hidden sm:inline">Home</span>
-              </Link>
-              <button
-                onClick={clearChat}
-                className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-300"
-                title="Clear all chats"
-              >
-                <Trash2 size={20} />
-              </button>
-              <button
-                onClick={handleSignOut}
-                className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-300"
-                title="Sign out"
-              >
-                <LogOut size={20} />
-              </button>
-            </div>
-          </div>
-        </div>
+        {renderHeader()}
 
         {error && (
           <div className="p-4 bg-red-50 border-l-4 border-red-500 flex items-center gap-3">

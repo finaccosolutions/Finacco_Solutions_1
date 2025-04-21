@@ -85,7 +85,6 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
       }
 
       const encodedKey = encodeURIComponent(key.trim());
-      // Updated to use v1beta and gemini-2.0-flash model
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash?key=${encodedKey}`;
 
       const controller = new AbortController();
@@ -205,22 +204,12 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
         throw insertError;
       }
 
-      const { data: savedKey, error: verifyError } = await supabase
-        .from('api_keys')
-        .select('gemini_key')
-        .eq('user_id', session.user.id)
-        .maybeSingle();
-
-      if (verifyError || !savedKey || savedKey.gemini_key !== trimmedApiKey) {
-        throw new Error('Failed to verify saved API key. Please try again.');
-      }
-      
       window.__GEMINI_API_KEY = trimmedApiKey;
       setSuccess('API key saved successfully!');
       
       setTimeout(() => {
         if (returnUrl) {
-          navigate(returnUrl);
+          window.location.href = returnUrl;
         } else {
           onComplete();
         }
