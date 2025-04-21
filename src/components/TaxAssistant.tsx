@@ -38,10 +38,18 @@ try {
   console.error('Failed to initialize Supabase client:', error);
 }
 
-const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true
-});
+// Only initialize OpenAI if API key is available
+let openai = null;
+try {
+  if (OPENAI_API_KEY) {
+    openai = new OpenAI({
+      apiKey: OPENAI_API_KEY,
+      dangerouslyAllowBrowser: true
+    });
+  }
+} catch (error) {
+  console.error('Failed to initialize OpenAI client:', error);
+}
 
 const RATE_LIMIT_WINDOW = 60000;
 const MAX_REQUESTS_PER_WINDOW = 3;
@@ -534,6 +542,10 @@ const TaxAssistant: React.FC = () => {
         setMessages(updatedMessages);
         await saveToHistory(updatedMessages, input);
       } else {
+        if (!openai) {
+          throw new Error('OpenAI API key is not configured. Please check your environment variables.');
+        }
+
         const systemPrompt = `You are a knowledgeable tax assistant specializing in Indian GST and Income Tax. 
         Format your responses with:
         - Clear section headers (Overview, Details, Important Points)
@@ -597,6 +609,9 @@ const TaxAssistant: React.FC = () => {
           errorMessage = 'Gemini API is not available. Switched to OpenAI. Please try your question again.';
         } else if (error.message.includes('429') || error.message.includes('quota exceeded')) {
           errorMessage = 'You have reached the API rate limit. Please try again in a few minutes.';
+        } else if (error.message.includes('OpenAI API key is not configured')) {
+          setUseGemini(true);
+          errorMessage = 'OpenAI is not available. Using Gemini API instead. Please try your question again.';
         } else {
           errorMessage = error.message;
         }
@@ -788,7 +803,8 @@ const TaxAssistant: React.FC = () => {
           <div className="safe-top flex items-center justify-between p-4 border-b border-white/10">
             <div className="flex items-center gap-2 text-white">
               <Brain size={20} />
-              <h2 className="text-lg font-semibold">Chat History</h2>
+              <h2 className="text-lg font-semib
+old">Chat History</h2>
             </div>
             <button
               onClick={() => setShowHistory(false)}
