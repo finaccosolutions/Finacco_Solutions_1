@@ -85,20 +85,27 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
       }
 
       const encodedKey = encodeURIComponent(key.trim());
-      // Updated to use v1beta and gemini-2.0-flash model
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash?key=${encodedKey}`;
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro/generateContent?key=${encodedKey}`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), MAX_TIMEOUT);
 
       try {
         const response = await fetch(apiUrl, {
-          method: 'GET',
+          method: 'POST',
           headers: {
-            'Accept': 'application/json',
+            'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: "Test message to validate API key"
+              }]
+            }]
+          }),
           signal: controller.signal,
           cache: 'no-cache',
+          mode: 'cors', // Explicitly set CORS mode
         });
 
         clearTimeout(timeoutId);
@@ -147,7 +154,15 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
           }
           return {
             isValid: false,
-            error: 'Request timed out. Please try again'
+            error: 'Request timed out. Please check your network connection and try again'
+          };
+        }
+
+        // Handle network errors specifically
+        if (fetchError instanceof TypeError && fetchError.message === 'Failed to fetch') {
+          return {
+            isValid: false,
+            error: 'Network error: Please check your internet connection and ensure you can access the Google API'
           };
         }
 
@@ -164,7 +179,7 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
 
       return {
         isValid: false,
-        error: 'Failed to validate API key. Please try again in a few moments'
+        error: 'Failed to validate API key. Please ensure you have a stable internet connection and try again'
       };
     }
   };
