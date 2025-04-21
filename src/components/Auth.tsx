@@ -11,7 +11,7 @@ const supabase = createClient(
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true
+      detectSessionInUrl: false
     }
   }
 );
@@ -62,14 +62,6 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, returnUrl }) => {
       if (!session) {
         throw new Error('No valid session after authentication');
       }
-
-      supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'TOKEN_REFRESHED') {
-          console.log('Token refreshed successfully');
-        } else if (event === 'SIGNED_OUT') {
-          onAuthSuccess();
-        }
-      });
 
       setShowApiKeySetup(true);
     } catch (error) {

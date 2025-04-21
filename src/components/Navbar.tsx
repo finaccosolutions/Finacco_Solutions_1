@@ -12,7 +12,7 @@ const supabase = createClient(
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true
+      detectSessionInUrl: false
     }
   }
 );
@@ -127,7 +127,7 @@ const Navbar: React.FC = () => {
               <button
                 onClick={() => {
                   setIsLogin(true);
-                  setShowAuthModal(true);
+                  navigate('/tax-assistant');
                   setShowAccountMenu(false);
                 }}
                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
@@ -138,7 +138,7 @@ const Navbar: React.FC = () => {
               <button
                 onClick={() => {
                   setIsLogin(false);
-                  setShowAuthModal(true);
+                  navigate('/tax-assistant');
                   setShowAccountMenu(false);
                 }}
                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
@@ -257,8 +257,7 @@ const Navbar: React.FC = () => {
             <>
               <button
                 onClick={() => {
-                  setIsLogin(true);
-                  setShowAuthModal(true);
+                  navigate('/tax-assistant');
                   setIsOpen(false);
                 }}
                 className="flex items-center space-x-2 text-xl text-gray-100 hover:text-white font-medium transition-all duration-300 transform hover:translate-x-2 hover:bg-white/10 px-4 py-2 rounded-lg"
@@ -268,8 +267,7 @@ const Navbar: React.FC = () => {
               </button>
               <button
                 onClick={() => {
-                  setIsLogin(false);
-                  setShowAuthModal(true);
+                  navigate('/tax-assistant');
                   setIsOpen(false);
                 }}
                 className="flex items-center space-x-2 text-xl text-gray-100 hover:text-white font-medium transition-all duration-300 transform hover:translate-x-2 hover:bg-white/10 px-4 py-2 rounded-lg"
@@ -281,21 +279,6 @@ const Navbar: React.FC = () => {
           )}
         </nav>
       </div>
-
-      {/* Auth Modal */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="relative bg-white rounded-lg p-8 max-w-md w-full mx-4">
-            <button
-              onClick={() => setShowAuthModal(false)}
-              className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
-            >
-              <X size={24} />
-            </button>
-            <Auth onAuthSuccess={handleAuthSuccess} />
-          </div>
-        </div>
-      )}
 
       <button
         onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}

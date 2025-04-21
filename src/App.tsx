@@ -18,7 +18,7 @@ const supabase = createClient(
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true
+      detectSessionInUrl: false
     }
   }
 );
@@ -29,24 +29,38 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = React.useState<boolean | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
   const location = useLocation();
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setIsAuthenticated(!!session);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('Error checking auth status:', error);
+          setIsAuthenticated(false);
+        } else {
+          setIsAuthenticated(!!session);
+        }
+      } catch (err) {
+        console.error('Error in auth check:', err);
+        setIsAuthenticated(false);
+      } finally {
+        setIsLoading(false);
+      }
     };
     
     checkAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       setIsAuthenticated(!!session);
+      setIsLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  if (isAuthenticated === null) {
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
@@ -83,6 +97,7 @@ const AppContent = () => {
               <TaxAssistant />
             </ProtectedRoute>
           } />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
       {!isTaxAssistant && (

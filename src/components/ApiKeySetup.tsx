@@ -105,6 +105,7 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
           }),
           signal: controller.signal,
           cache: 'no-cache',
+          mode: 'cors', // Explicitly set CORS mode
         });
 
         clearTimeout(timeoutId);
@@ -151,7 +152,18 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
             await sleep(delay);
             return validateApiKey(key, attempt + 1);
           }
-          throw new Error('Request timed out. Please check your network connection and try again');
+          return {
+            isValid: false,
+            error: 'Request timed out. Please check your network connection and try again'
+          };
+        }
+
+        // Handle network errors specifically
+        if (fetchError instanceof TypeError && fetchError.message === 'Failed to fetch') {
+          return {
+            isValid: false,
+            error: 'Network error: Please check your internet connection and ensure you can access the Google API'
+          };
         }
 
         throw fetchError;
@@ -165,7 +177,10 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
         return validateApiKey(key, attempt + 1);
       }
 
-      throw error;
+      return {
+        isValid: false,
+        error: 'Failed to validate API key. Please ensure you have a stable internet connection and try again'
+      };
     }
   };
 
@@ -188,18 +203,9 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
         return;
       }
 
-      try {
-        const validation = await validateApiKey(trimmedApiKey);
-        if (!validation.isValid) {
-          setError(validation.error || 'Invalid API key');
-          return;
-        }
-      } catch (validationError) {
-        if (validationError instanceof Error) {
-          setError(validationError.message);
-        } else {
-          setError('Failed to validate API key. Please try again.');
-        }
+      const validation = await validateApiKey(trimmedApiKey);
+      if (!validation.isValid) {
+        setError(validation.error || 'Invalid API key');
         return;
       }
 
