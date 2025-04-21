@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import ReactMarkdown from 'react-markdown';
 import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare } from 'lucide-react';
-import OpenAI from 'openai';
+import { Link, useNavigate } from 'react-router-dom';
 import Auth from './Auth';
-import { Link } from 'react-router-dom';
+import ApiKeySetup from './ApiKeySetup';
 
 interface Message {
   id: string;
@@ -38,7 +38,6 @@ try {
   console.error('Failed to initialize Supabase client:', error);
 }
 
-// Only initialize OpenAI if API key is available
 let openai = null;
 try {
   if (OPENAI_API_KEY) {
@@ -55,25 +54,17 @@ const RATE_LIMIT_WINDOW = 60000;
 const MAX_REQUESTS_PER_WINDOW = 3;
 
 const formatResponse = (text: string) => {
-  // Convert headings: **Heading** becomes <h3>
   text = text.replace(/\*\*(.*?)\*\*/g, '<h3 class="text-xl font-bold text-gray-800 mt-4 mb-2">$1</h3>');
-
-  // Safe italic formatting: *italic* only when surrounded by space or punctuation
   text = text.replace(/(^|\s)\*(\S[^*]*\S)\*(?=\s|\.|,|$)/g, '$1<em class="text-gray-600 italic">$2</em>');
-
-  // Highlight Important/Key Notes
   text = text.replace(
     /(Important Points|Key Points|Note):/g,
     '<div class="bg-blue-50 border-l-4 border-blue-500 p-4 my-4 rounded-r-lg"><h4 class="font-bold text-blue-800 mb-2">$1:</h4>'
   );
-
-  // Section headers like Overview:, Details:, etc.
   text = text.replace(
     /^(Overview|Summary|Details|References):/gm,
     '<h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">$1</h3>'
   );
 
-  // Bullet list formatting
   if (text.match(/^[\*\-•●○]\s+/m)) {
     const lines = text.split('\n');
     let insideList = false;
@@ -99,7 +90,6 @@ const formatResponse = (text: string) => {
     text = formattedText;
   }
 
-  // Table formatting using markdown-style |
   if (text.includes('|')) {
     const blocks = text.split('\n\n');
     const formattedBlocks = blocks.map(block => {
@@ -138,17 +128,14 @@ const formatResponse = (text: string) => {
     text = formattedBlocks.join('\n\n');
   }
 
-  // Code block formatting using ```
   text = text.replace(
     /```([^`]+)```/g,
     '<pre class="bg-gray-800 text-gray-100 rounded-lg p-4 my-4 overflow-x-auto"><code>$1</code></pre>'
   );
 
-  // Paragraph formatting
   text = text.replace(/\n\n/g, '</div>\n\n<div class="mb-4">');
   text = '<div class="mb-4">' + text + '</div>';
 
-  // Cleanup: remove stray "*" used incorrectly
   text = text.replace(/(^|\s)\*(?=\s|$)/g, '');
 
   return text;
@@ -157,7 +144,6 @@ const formatResponse = (text: string) => {
 const getFinaccoResponse = (query: string) => {
   const lowerQuery = query.toLowerCase();
   
-  // Company overview
   if (lowerQuery.includes('about finacco') || lowerQuery.includes('company information') || lowerQuery.includes('finacco solutions')) {
     return `
 **About Finacco Solutions**
@@ -195,7 +181,6 @@ Visit our service platforms:
 `;
   }
 
-  // Contact information
   if (lowerQuery.includes('contact') || lowerQuery.includes('phone') || lowerQuery.includes('email') || lowerQuery.includes('address')) {
     return `
 **Contact Information for Finacco Solutions:**
@@ -212,7 +197,6 @@ Feel free to reach out to us through WhatsApp or email for quick responses.
 `;
   }
 
-  // Finacco Connect services
   if (lowerQuery.includes('tally') || lowerQuery.includes('import') || lowerQuery.includes('connect') || lowerQuery.includes('utility software')) {
     return `
 **Finacco Connect Services:**
@@ -236,7 +220,6 @@ For detailed information or support:
 `;
   }
 
-  // Finacco Advisory services
   if (lowerQuery.includes('advisory') || lowerQuery.includes('financial services')) {
     return `
 **Finacco Advisory Services:**
@@ -274,7 +257,11 @@ Contact us for professional assistance:
 };
 
 const TaxAssistant: React.FC = () => {
+  const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [isCheckingApiKey, setIsCheckingApiKey] = useState(true);
   const [user, setUser] = useState(null);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -313,6 +300,56 @@ const TaxAssistant: React.FC = () => {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    if (!supabase) return;
+    
+    const checkAuthAndApiKey = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setIsAuthenticated(!!session);
+        
+        if (session?.user) {
+          const { data: apiKeyData, error: apiKeyError } = await supabase
+            .from('api_keys')
+            .select('gemini_key')
+            .eq('user_id', session.user.id)
+            .maybeSingle();
+            
+          if (!apiKeyError && apiKeyData?.gemini_key) {
+            setHasApiKey(true);
+            window.__GEMINI_API_KEY = apiKeyData.gemini_key;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking auth status:', error);
+      } finally {
+        setIsCheckingAuth(false);
+        setIsCheckingApiKey(false);
+      }
+    };
+
+    checkAuthAndApiKey();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setIsAuthenticated(!!session);
+      if (session?.user) {
+        const { data: apiKeyData } = await supabase
+          .from('api_keys')
+          .select('gemini_key')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+          
+        setHasApiKey(!!apiKeyData?.gemini_key);
+      } else {
+        setHasApiKey(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
@@ -720,13 +757,27 @@ const TaxAssistant: React.FC = () => {
     }, 300);
   };
 
+  if (isCheckingAuth || isCheckingApiKey) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return <Auth onAuthSuccess={() => setIsAuthenticated(true)} />;
   }
 
+  if (!hasApiKey) {
+    return <ApiKeySetup onComplete={() => setHasApiKey(true)} returnUrl="/tax-assistant" />;
+  }
+
   return (
     <div className="h-screen flex bg-gray-50 overflow-x-hidden">
-      {/* History Panel - Hidden on mobile, collapsible on desktop */}
       <div 
         className={`hidden md:flex fixed md:relative inset-y-0 left-0 transform ${
           showHistory ? 'w-[280px]' : 'w-[50px]'
@@ -774,6 +825,7 @@ const TaxAssistant: React.FC = () => {
                       currentChatId === chat.id ? 'bg-white/10' : ''
                     }`}
                   >
+                    
                     <div className="flex items-start gap-3">
                       <MessageSquare size={20} className="text-white/70" />
                       <div className="flex-grow min-w-0 pr-8">
@@ -797,14 +849,12 @@ const TaxAssistant: React.FC = () => {
         </div>
       </div>
 
-      {/* Mobile History Panel - Full screen overlay */}
       {showHistory && (
         <div className="md:hidden fixed inset-0 bg-gradient-to-br from-gray-800 to-gray-900 z-50 flex flex-col">
           <div className="safe-top flex items-center justify-between p-4 border-b border-white/10">
             <div className="flex items-center gap-2 text-white">
               <Brain size={20} />
-              <h2 className="text-lg font-semib
-old">Chat History</h2>
+              <h2 className="text-lg font-semibold">Chat History</h2>
             </div>
             <button
               onClick={() => setShowHistory(false)}
@@ -860,9 +910,7 @@ old">Chat History</h2>
         </div>
       )}
 
-      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col h-screen max-w-full">
-        {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md">
           <div className="flex items-center justify-between p-4 max-w-full overflow-x-auto">
             <div className="flex items-center gap-3 min-w-0">
@@ -906,7 +954,6 @@ old">Chat History</h2>
           </div>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="p-4 bg-red-50 border-l-4 border-red-500 flex items-center gap-3">
             <AlertCircle className="text-red-500 flex-shrink-0" size={20} />
@@ -914,7 +961,6 @@ old">Chat History</h2>
           </div>
         )}
 
-        {/* Messages Container */}
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           <div className="max-w-7xl mx-auto space-y-4">
             {messages.map((message) => (
@@ -987,7 +1033,6 @@ old">Chat History</h2>
           </div>
         </div>
 
-        {/* Input Form */}
         <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200 bg-white safe-bottom">
           <div className="max-w-7xl mx-auto flex items-start gap-4">
             <div className="flex-1 relative">
