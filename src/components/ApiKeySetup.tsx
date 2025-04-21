@@ -18,35 +18,155 @@ interface ApiKeySetupProps {
   onComplete: () => void;
 }
 
+// Retry configuration
+const RETRY_ATTEMPTS = 3;
+const INITIAL_RETRY_DELAY = 1000; // 1 second
+const MAX_TIMEOUT = 15000; // 15 seconds
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
 
-  const validateApiKey = async (key: string): Promise<boolean> => {
+  const validateApiKey = async (key: string, attempt = 1): Promise<{ isValid: boolean; error?: string }> => {
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${key}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: "Test message to validate API key"
-            }]
-          }]
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Invalid API key');
+      // Basic validation checks
+      if (!key || typeof key !== 'string') {
+        return { 
+          isValid: false, 
+          error: 'Please enter a valid API key' 
+        };
       }
 
-      return true;
+      if (!key.startsWith('AIza')) {
+        return { 
+          isValid: false, 
+          error: 'Invalid API key format. Key should start with "AIza"' 
+        };
+      }
+
+      if (key.length < 30) {
+        return { 
+          isValid: false, 
+          error: 'API key appears too short. Please check the key' 
+        };
+      }
+
+      // Encode the API key to handle special characters
+      const encodedKey = encodeURIComponent(key.trim());
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro/generateContent?key=${encodedKey}`;
+
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), MAX_TIMEOUT);
+
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: "Test message to validate API key"
+              }]
+            }]
+          }),
+          signal: controller.signal,
+          // Add cache control to prevent caching issues
+          cache: 'no-cache',
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error occurred' } }));
+          const errorMessage = errorData.error?.message || 'Unknown error occurred';
+          
+          // Handle specific API error cases
+          if (errorMessage.includes('API key not valid')) {
+            return { 
+              isValid: false, 
+              error: 'Invalid API key. Please make sure you copied the entire key correctly' 
+            };
+          }
+          if (errorMessage.includes('API has not been enabled')) {
+            return { 
+              isValid: false, 
+              error: 'The Gemini API is not enabled for this API key. Please enable it in your Google Cloud Console' 
+            };
+          }
+          if (errorMessage.includes('billing')) {
+            return { 
+              isValid: false, 
+              error: 'Please ensure billing is enabled for your Google Cloud project' 
+            };
+          }
+          if (errorMessage.includes('permission') || errorMessage.includes('unauthorized')) {
+            return { 
+              isValid: false, 
+              error: 'This API key does not have permission to access the Gemini API. Please check the API key permissions' 
+            };
+          }
+          
+          // If we get here and still have retries left, try again
+          if (attempt < RETRY_ATTEMPTS) {
+            const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+            await sleep(delay);
+            return validateApiKey(key, attempt + 1);
+          }
+
+          return { 
+            isValid: false, 
+            error: `API Error: ${errorMessage}` 
+          };
+        }
+
+        // Successful validation
+        return { isValid: true };
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        
+        if (fetchError.name === 'AbortError') {
+          if (attempt < RETRY_ATTEMPTS) {
+            const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+            await sleep(delay);
+            return validateApiKey(key, attempt + 1);
+          }
+          return {
+            isValid: false,
+            error: 'Request timed out. Please check your network connection and try again'
+          };
+        }
+
+        // Network or other fetch errors
+        if (attempt < RETRY_ATTEMPTS) {
+          const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+          await sleep(delay);
+          return validateApiKey(key, attempt + 1);
+        }
+
+        return {
+          isValid: false,
+          error: 'Unable to connect to the Gemini API. Please check your network connection and try again'
+        };
+      }
     } catch (error) {
-      return false;
+      console.error('API key validation error:', error);
+      
+      if (attempt < RETRY_ATTEMPTS) {
+        const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+        await sleep(delay);
+        return validateApiKey(key, attempt + 1);
+      }
+
+      return { 
+        isValid: false, 
+        error: 'An error occurred while validating the API key. Please try again later.' 
+      };
     }
   };
 
@@ -62,32 +182,28 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
         throw new Error('No authenticated session');
       }
 
-      if (!apiKey) {
+      const trimmedApiKey = apiKey.trim();
+      if (!trimmedApiKey) {
         throw new Error('Please enter your Gemini API key');
       }
 
-      if (!apiKey.startsWith('AIza')) {
-        throw new Error('Invalid Gemini API key format. Key should start with "AIza"');
-      }
-
       // Validate the API key before saving
-      const isValid = await validateApiKey(apiKey);
-      if (!isValid) {
-        throw new Error('Invalid API key. Please check your key and try again.');
+      const validation = await validateApiKey(trimmedApiKey);
+      if (!validation.isValid) {
+        throw new Error(validation.error || 'Invalid API key');
       }
 
       const { error: insertError } = await supabase
         .from('api_keys')
         .upsert({
           user_id: session.user.id,
-          gemini_key: apiKey
+          gemini_key: trimmedApiKey
         });
 
       if (insertError) throw insertError;
       
       // Set the API key in the window object
-      window.__GEMINI_API_KEY = apiKey;
-      console.log('API key successfully set and validated');
+      window.__GEMINI_API_KEY = trimmedApiKey;
       onComplete();
     } catch (error) {
       console.error('Error saving API key:', error);
