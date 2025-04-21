@@ -10,6 +10,7 @@ import Footer from './components/Footer';
 import WhatsAppButton from './components/WhatsAppButton';
 import TaxAssistant from './components/TaxAssistant';
 import Auth from './components/Auth';
+import ApiKeySetup from './components/ApiKeySetup';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -77,7 +78,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
 const AppContent = () => {
   const location = useLocation();
-  const isTaxAssistant = location.pathname === '/tax-assistant';
+  const isTaxAssistant = location.pathname === '/tax-assistant' || location.pathname === '/api-key-setup';
 
   return (
     <div className="flex flex-col min-h-screen overflow-x-hidden">
@@ -95,6 +96,11 @@ const AppContent = () => {
           <Route path="/tax-assistant" element={
             <ProtectedRoute>
               <TaxAssistant />
+            </ProtectedRoute>
+          } />
+          <Route path="/api-key-setup" element={
+            <ProtectedRoute>
+              <ApiKeySetup onComplete={() => null} />
             </ProtectedRoute>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />
