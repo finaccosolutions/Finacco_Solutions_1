@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import ReactMarkdown from 'react-markdown';
-import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare } from 'lucide-react';
+import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Settings } from 'lucide-react';
 import Auth from './Auth';
 import ApiKeySetup from './ApiKeySetup';
 import { Link } from 'react-router-dom';
@@ -211,10 +211,10 @@ const TaxAssistant: React.FC = () => {
   const [showHistory, setShowHistory] = useState(true);
   const [isHistoryHovered, setIsHistoryHovered] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useGemini, setUseGemini] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [typingMessage, setTypingMessage] = useState<Message | null>(null);
   const [textareaHeight, setTextareaHeight] = useState('56px');
+  const [showApiKeySetup, setShowApiKeySetup] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestTimestamps = useRef<number[]>([]);
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -274,16 +274,13 @@ const TaxAssistant: React.FC = () => {
       if (error) throw error;
 
       if (apiKey?.gemini_key) {
-        setUseGemini(true);
         window.__GEMINI_API_KEY = apiKey.gemini_key;
         setNeedsApiKey(false);
       } else {
-        setUseGemini(false);
         setNeedsApiKey(true);
       }
     } catch (error) {
       console.error('Error checking API key:', error);
-      setUseGemini(false);
       setNeedsApiKey(true);
     }
   };
@@ -442,89 +439,97 @@ const TaxAssistant: React.FC = () => {
         return;
       }
 
-      if (useGemini && window.__GEMINI_API_KEY) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${window.__GEMINI_API_KEY}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: `You are a helpful and knowledgeable tax assistant in India. Reply to the following query with clear, concise, and accurate information focused only on the user's question. 
-                      Avoid introductions or general explanations unless directly related. 
-                      Use bullet points, tables, and section headings if helpful for clarity. 
-                      Keep the language simple and easy to understand, especially for non-experts.
-                      
-                      User's query: ${input}`
-              }]
-            }],
-            generationConfig: {
-              temperature: 0.7,
-              topK: 40,
-              topP: 0.95,
-              maxOutputTokens: 2048,
-            },
-            safetySettings: [
-              {
-                category: "HARM_CATEGORY_HARASSMENT",
-                threshold: "BLOCK_MEDIUM_AND_ABOVE"
-              },
-              {
-                category: "HARM_CATEGORY_HATE_SPEECH",
-                threshold: "BLOCK_MEDIUM_AND_ABOVE"
-              },
-              {
-                category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                threshold: "BLOCK_MEDIUM_AND_ABOVE"
-              },
-              {
-                category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-                threshold: "BLOCK_MEDIUM_AND_ABOVE"
-              }
-            ]
-          })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.text();
-          throw new Error(`Gemini API error: ${response.status} - ${errorData}`);
-        }
-
-        const data = await response.json();
-        if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          throw new Error('Invalid response format from Gemini API');
-        }
-
-        let displayedContent = '';
-        const words = data.candidates[0].content.parts[0].text.split(' ');
-        
-        for (let i = 0; i < words.length; i++) {
-          await new Promise(resolve => setTimeout(resolve, 50));
-          displayedContent += words[i] + ' ';
-          setTypingMessage(prev => ({
-            ...prev!,
-            content: formatResponse(displayedContent)
-          }));
-        }
-
-        const text = formatResponse(data.candidates[0].content.parts[0].text);
-        
-        const assistantResponse: Message = {
-          id: typingIndicator.id,
-          role: 'assistant',
-          content: text,
-          timestamp: new Date().toISOString(),
-          name: 'Finacco Solutions'
-        };
-
+      // Check if Gemini API key is available and valid
+      if (!window.__GEMINI_API_KEY || typeof window.__GEMINI_API_KEY !== 'string' || !window.__GEMINI_API_KEY.startsWith('AIza')) {
         setTypingMessage(null);
-        const updatedMessages = [...messages, newMessage, assistantResponse];
-        setMessages(updatedMessages);
-        await saveToHistory(updatedMessages, input);
-      } else {
-        throw new Error('No API key available');
+        setError('Invalid or missing API key. Please check your API key in settings.');
+        setNeedsApiKey(true);
+        return;
       }
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${window.__GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `You are a helpful and knowledgeable tax assistant in India. Reply to the following query with clear, concise, and accurate information focused only on the user's question. 
+                    Avoid introductions or general explanations unless directly related. 
+                    Use bullet points, tables, and section headings if helpful for clarity. 
+                    Keep the language simple and easy to understand, especially for non-experts.
+                    
+                    User's query: ${input}`
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 2048,
+          },
+          safetySettings: [
+            {
+              category: "HARM_CATEGORY_HARASSMENT",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+              category: "HARM_CATEGORY_HATE_SPEECH",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE"
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        if (errorData.error?.message?.includes('API key not valid')) {
+          setNeedsApiKey(true);
+          throw new Error('Invalid API key. Please enter a valid Gemini API key.');
+        }
+        throw new Error(`Gemini API error: ${response.status} - ${JSON.stringify(errorData)}`);
+      }
+
+      const data = await response.json();
+      if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        throw new Error('Invalid response format from Gemini API');
+      }
+
+      let displayedContent = '';
+      const words = data.candidates[0].content.parts[0].text.split(' ');
+      
+      for (let i = 0; i < words.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        displayedContent += words[i] + ' ';
+        setTypingMessage(prev => ({
+          ...prev!,
+          content: formatResponse(displayedContent)
+        }));
+      }
+
+      const text = formatResponse(data.candidates[0].content.parts[0].text);
+      
+      const assistantResponse: Message = {
+        id: typingIndicator.id,
+        role: 'assistant',
+        content: text,
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions'
+      };
+
+      setTypingMessage(null);
+      const updatedMessages = [...messages, newMessage, assistantResponse];
+      setMessages(updatedMessages);
+      await saveToHistory(updatedMessages, input);
     } catch (error) {
       console.error('Error:', error);
       setTypingMessage(null);
@@ -637,6 +642,10 @@ const TaxAssistant: React.FC = () => {
     }, 300);
   };
 
+  const handleApiKeySetup = () => {
+    setShowApiKeySetup(true);
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -652,9 +661,10 @@ const TaxAssistant: React.FC = () => {
     return <Auth onAuthSuccess={() => setIsAuthenticated(true)} />;
   }
 
-  if (needsApiKey) {
+  if (needsApiKey || showApiKeySetup) {
     return <ApiKeySetup onComplete={() => {
       setNeedsApiKey(false);
+      setShowApiKeySetup(false);
       if (user) {
         checkApiKey(user.id);
       }
@@ -817,6 +827,14 @@ const TaxAssistant: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-2 ml-4">
+              <button
+                onClick={handleApiKeySetup}
+                className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                title="API Key Settings"
+              >
+                <Settings size={20} />
+                <span className="hidden sm:inline">API Key</span>
+              </button>
               <Link
                 to="/"
                 className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { AlertCircle, Key, Loader2 } from 'lucide-react';
+import { AlertCircle, Key, Loader2, Info } from 'lucide-react';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -21,8 +21,36 @@ interface ApiKeySetupProps {
 const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState('');
 
-  const generateAndSaveApiKey = async () => {
+  const validateApiKey = async (key: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${key}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: "Test message to validate API key"
+            }]
+          }]
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Invalid API key');
+      }
+
+      return true;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const saveApiKey = async () => {
     setGenerating(true);
     setError(null);
 
@@ -34,10 +62,19 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
         throw new Error('No authenticated session');
       }
 
-      // Generate a random API key
-      const apiKey = 'AIza' + Array.from(crypto.getRandomValues(new Uint8Array(30)))
-        .map(byte => byte.toString(16).padStart(2, '0'))
-        .join('');
+      if (!apiKey) {
+        throw new Error('Please enter your Gemini API key');
+      }
+
+      if (!apiKey.startsWith('AIza')) {
+        throw new Error('Invalid Gemini API key format. Key should start with "AIza"');
+      }
+
+      // Validate the API key before saving
+      const isValid = await validateApiKey(apiKey);
+      if (!isValid) {
+        throw new Error('Invalid API key. Please check your key and try again.');
+      }
 
       const { error: insertError } = await supabase
         .from('api_keys')
@@ -48,14 +85,16 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
 
       if (insertError) throw insertError;
       
+      // Set the API key in the window object
       window.__GEMINI_API_KEY = apiKey;
+      console.log('API key successfully set and validated');
       onComplete();
     } catch (error) {
-      console.error('Error generating API key:', error);
+      console.error('Error saving API key:', error);
       if (error instanceof Error) {
         setError(error.message.includes('authenticated') 
           ? 'Please sign in again.'
-          : 'Failed to generate API key. Please try again.');
+          : error.message);
       } else {
         setError('An unexpected error occurred.');
       }
@@ -75,11 +114,26 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
                 <Key className="w-8 h-8 text-blue-600" />
               </div>
               <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                AI Assistant Setup
+                Set Up Your Gemini API Key
               </h2>
               <p className="text-gray-600">
-                We'll automatically set up your AI assistant with a secure API key.
+                Enter your Gemini API key to start using the AI assistant
               </p>
+            </div>
+
+            <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded-r-lg">
+              <div className="flex items-start gap-3">
+                <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-700">
+                  <p className="font-medium mb-1">How to get your API key:</p>
+                  <ol className="list-decimal ml-4 space-y-1">
+                    <li>Visit the <a href="https://makersuite.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Google AI Studio</a></li>
+                    <li>Sign in with your Google account</li>
+                    <li>Create a new API key or use an existing one</li>
+                    <li>Copy and paste your API key here</li>
+                  </ol>
+                </div>
+              </div>
             </div>
 
             {error && (
@@ -89,26 +143,40 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
               </div>
             )}
 
+            <div className="mb-6">
+              <label htmlFor="apiKey" className="block text-sm font-medium text-gray-700 mb-2">
+                Gemini API Key
+              </label>
+              <input
+                type="password"
+                id="apiKey"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter your Gemini API key"
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300"
+              />
+            </div>
+
             <button
-              onClick={generateAndSaveApiKey}
-              disabled={generating}
+              onClick={saveApiKey}
+              disabled={generating || !apiKey.trim()}
               className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium py-3 px-4 rounded-lg hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {generating ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Setting up...
+                  Saving...
                 </>
               ) : (
                 <>
                   <Key className="w-5 h-5" />
-                  Set Up AI Assistant
+                  Save API Key
                 </>
               )}
             </button>
 
             <p className="mt-4 text-sm text-gray-500 text-center">
-              This will automatically generate and securely store your API key.
+              Your API key will be securely stored and used only for your account.
             </p>
           </div>
         </div>
