@@ -5,7 +5,14 @@ import ApiKeySetup from './ApiKeySetup';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
 );
 
 interface AuthProps {
@@ -26,21 +33,46 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
     setLoading(true);
 
     try {
+      let authResponse;
+      
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
+        authResponse = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (error) throw error;
-        setShowApiKeySetup(true);
       } else {
-        const { error } = await supabase.auth.signUp({
+        authResponse = await supabase.auth.signUp({
           email,
           password,
         });
-        if (error) throw error;
-        setShowApiKeySetup(true);
       }
+
+      if (authResponse.error) {
+        throw authResponse.error;
+      }
+
+      // Verify session is valid
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      if (!session) {
+        throw new Error('No valid session after authentication');
+      }
+
+      // Set up refresh token listener
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'TOKEN_REFRESHED') {
+          console.log('Token refreshed successfully');
+        } else if (event === 'SIGNED_OUT') {
+          // Handle sign out
+          onAuthSuccess();
+        }
+      });
+
+      setShowApiKeySetup(true);
     } catch (error) {
       if (error instanceof Error) {
         setError(error.message);

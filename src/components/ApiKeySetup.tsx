@@ -4,7 +4,14 @@ import { AlertCircle, Key, Loader2 } from 'lucide-react';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
 );
 
 interface ApiKeySetupProps {
@@ -22,20 +29,30 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
 
   const checkExistingApiKey = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('No authenticated user');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) throw sessionError;
+      if (!session) {
+        throw new Error('No authenticated session');
+      }
 
-      const { data: apiKey } = await supabase
+      const { data: apiKey, error: apiKeyError } = await supabase
         .from('api_keys')
         .select('gemini_key')
-        .eq('user_id', user.id)
-        .single();
+        .eq('user_id', session.user.id)
+        .maybeSingle();
 
+      if (apiKeyError) throw apiKeyError;
+      
       if (apiKey) {
         onComplete();
       }
     } catch (error) {
       console.error('Error checking API key:', error);
+      if (error instanceof Error && error.message.includes('authenticated')) {
+        // Handle authentication errors by redirecting to auth
+        window.location.reload();
+      }
     } finally {
       setLoading(false);
     }
@@ -46,8 +63,12 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
     setError(null);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('No authenticated user');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) throw sessionError;
+      if (!session) {
+        throw new Error('No authenticated session');
+      }
 
       // Generate a random API key
       const apiKey = 'AIza' + Array.from(crypto.getRandomValues(new Uint8Array(30)))
@@ -57,7 +78,7 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
       const { error: insertError } = await supabase
         .from('api_keys')
         .upsert({
-          user_id: user.id,
+          user_id: session.user.id,
           gemini_key: apiKey
         });
 
@@ -65,7 +86,11 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
       onComplete();
     } catch (error) {
       console.error('Error generating API key:', error);
-      setError('Failed to generate API key. Please try again.');
+      if (error instanceof Error && error.message.includes('authenticated')) {
+        window.location.reload();
+      } else {
+        setError('Failed to generate API key. Please try again.');
+      }
     } finally {
       setGenerating(false);
     }

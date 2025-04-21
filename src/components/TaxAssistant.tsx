@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare } from 'lucide-react';
 import OpenAI from 'openai';
 import Auth from './Auth';
+import ApiKeySetup from './ApiKeySetup';
 import { Link } from 'react-router-dom';
 
 interface Message {
@@ -214,6 +215,7 @@ const TaxAssistant: React.FC = () => {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [typingMessage, setTypingMessage] = useState<Message | null>(null);
   const [textareaHeight, setTextareaHeight] = useState('56px');
+  const [needsApiKey, setNeedsApiKey] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestTimestamps = useRef<number[]>([]);
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -269,18 +271,26 @@ const TaxAssistant: React.FC = () => {
 
   const checkApiKey = async (userId: string) => {
     try {
-      const { data: apiKey } = await supabase
+      const { data: apiKey, error } = await supabase
         .from('api_keys')
         .select('gemini_key')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
         
-      if (apiKey) {
+      if (error) throw error;
+
+      if (apiKey?.gemini_key) {
         setUseGemini(true);
         window.__GEMINI_API_KEY = apiKey.gemini_key;
+        setNeedsApiKey(false);
+      } else {
+        setUseGemini(false);
+        setNeedsApiKey(true);
       }
     } catch (error) {
       console.error('Error checking API key:', error);
+      setUseGemini(false);
+      setNeedsApiKey(true);
     }
   };
 
@@ -418,7 +428,7 @@ const TaxAssistant: React.FC = () => {
       }
 
       if (useGemini && window.__GEMINI_API_KEY) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${window.__GEMINI_API_KEY}`, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${window.__GEMINI_API_KEY}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -433,12 +443,37 @@ const TaxAssistant: React.FC = () => {
                       
                       User's query: ${input}`
               }]
-            }]
+            }],
+            generationConfig: {
+              temperature: 0.7,
+              topK: 40,
+              topP: 0.95,
+              maxOutputTokens: 2048,
+            },
+            safetySettings: [
+              {
+                category: "HARM_CATEGORY_HARASSMENT",
+                threshold: "BLOCK_MEDIUM_AND_ABOVE"
+              },
+              {
+                category: "HARM_CATEGORY_HATE_SPEECH",
+                threshold: "BLOCK_MEDIUM_AND_ABOVE"
+              },
+              {
+                category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                threshold: "BLOCK_MEDIUM_AND_ABOVE"
+              },
+              {
+                category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+                threshold: "BLOCK_MEDIUM_AND_ABOVE"
+              }
+            ]
           })
         });
 
         if (!response.ok) {
-          throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+          const errorData = await response.text();
+          throw new Error(`Gemini API error: ${response.status} - ${errorData}`);
         }
 
         const data = await response.json();
@@ -589,6 +624,15 @@ const TaxAssistant: React.FC = () => {
 
   if (!isAuthenticated) {
     return <Auth onAuthSuccess={() => setIsAuthenticated(true)} />;
+  }
+
+  if (needsApiKey) {
+    return <ApiKeySetup onComplete={() => {
+      setNeedsApiKey(false);
+      if (user) {
+        checkApiKey(user.id);
+      }
+    }} />;
   }
 
   return (
