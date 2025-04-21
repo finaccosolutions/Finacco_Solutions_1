@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Menu, X, Brain, LogIn, UserPlus, LogOut } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Menu, X, Brain, LogIn, UserPlus, LogOut, User, ChevronDown } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
 import Logo from './Logo';
+import Auth from './Auth';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -22,12 +23,10 @@ const Navbar: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -63,47 +62,21 @@ const Navbar: React.FC = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (error) throw error;
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+        setShowAccountMenu(false);
       }
+    };
 
-      setShowAuthModal(false);
-      setEmail('');
-      setPassword('');
-    } catch (error) {
-      console.error('Auth error:', error);
-      setError(error instanceof Error ? error.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate('/');
-  };
-
-  const scrollToTop = () => {
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth'
-    });
+    setShowAccountMenu(false);
   };
 
   const scrollToSection = (id: string) => {
@@ -113,6 +86,72 @@ const Navbar: React.FC = () => {
       setIsOpen(false);
     }
   };
+
+  const handleAuthSuccess = () => {
+    setShowAuthModal(false);
+    setShowAccountMenu(false);
+  };
+
+  const AccountMenu = () => (
+    <div 
+      ref={accountMenuRef}
+      className="relative"
+    >
+      <button
+        onClick={() => setShowAccountMenu(!showAccountMenu)}
+        className="flex items-center gap-2 text-gray-100 hover:text-white font-medium transition-all duration-300 relative group px-4 py-2 rounded-lg hover:bg-white/10"
+      >
+        <User size={20} />
+        <span>Account</span>
+        <ChevronDown size={16} className={`transition-transform duration-300 ${showAccountMenu ? 'rotate-180' : ''}`} />
+      </button>
+
+      {showAccountMenu && (
+        <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-2 z-50">
+          {user ? (
+            <>
+              <div className="px-4 py-2 border-b border-gray-100">
+                <p className="text-sm font-medium text-gray-900 truncate">{user.email}</p>
+                <p className="text-xs text-gray-500">Signed in</p>
+              </div>
+              <button
+                onClick={handleSignOut}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                <LogOut size={16} />
+                <span>Sign Out</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  setIsLogin(true);
+                  setShowAuthModal(true);
+                  setShowAccountMenu(false);
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                <LogIn size={16} />
+                <span>Sign In</span>
+              </button>
+              <button
+                onClick={() => {
+                  setIsLogin(false);
+                  setShowAuthModal(true);
+                  setShowAccountMenu(false);
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                <UserPlus size={16} />
+                <span>Sign Up</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -140,47 +179,15 @@ const Navbar: React.FC = () => {
               </button>
             ))}
             
-            {user ? (
-              <div className="flex items-center gap-4">
-                <Link 
-                  to="/tax-assistant"
-                  className="flex items-center space-x-2 text-gray-100 hover:text-white font-medium transition-all duration-300 relative group px-4 py-2 rounded-lg hover:bg-white/10"
-                >
-                  <Brain size={20} />
-                  <span>Tax AI Assistant</span>
-                </Link>
-                <button
-                  onClick={handleSignOut}
-                  className="flex items-center space-x-2 text-gray-100 hover:text-white font-medium transition-all duration-300 relative group px-4 py-2 rounded-lg hover:bg-white/10"
-                >
-                  <LogOut size={20} />
-                  <span>Sign Out</span>
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={() => {
-                    setIsLogin(true);
-                    setShowAuthModal(true);
-                  }}
-                  className="flex items-center space-x-2 text-gray-100 hover:text-white font-medium transition-all duration-300 relative group px-4 py-2 rounded-lg hover:bg-white/10"
-                >
-                  <LogIn size={20} />
-                  <span>Sign In</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setIsLogin(false);
-                    setShowAuthModal(true);
-                  }}
-                  className="flex items-center space-x-2 bg-white text-blue-600 font-medium transition-all duration-300 px-4 py-2 rounded-lg hover:bg-blue-50"
-                >
-                  <UserPlus size={20} />
-                  <span>Sign Up</span>
-                </button>
-              </div>
-            )}
+            <Link 
+              to="/tax-assistant"
+              className="flex items-center space-x-2 text-gray-100 hover:text-white font-medium transition-all duration-300 relative group px-4 py-2 rounded-lg hover:bg-white/10"
+            >
+              <Brain size={20} />
+              <span>Tax AI Assistant</span>
+            </Link>
+
+            <AccountMenu />
           </nav>
           
           <button
@@ -220,16 +227,21 @@ const Navbar: React.FC = () => {
             </button>
           ))}
           
+          <Link 
+            to="/tax-assistant"
+            className="flex items-center space-x-2 text-xl text-gray-100 hover:text-white font-medium transition-all duration-300 transform hover:translate-x-2 hover:bg-white/10 px-4 py-2 rounded-lg"
+            onClick={() => setIsOpen(false)}
+          >
+            <Brain size={24} />
+            <span>Tax AI Assistant</span>
+          </Link>
+
           {user ? (
             <>
-              <Link 
-                to="/tax-assistant"
-                className="flex items-center space-x-2 text-xl text-gray-100 hover:text-white font-medium transition-all duration-300 transform hover:translate-x-2 hover:bg-white/10 px-4 py-2 rounded-lg"
-                onClick={() => setIsOpen(false)}
-              >
-                <Brain size={24} />
-                <span>Tax AI Assistant</span>
-              </Link>
+              <div className="px-4 py-2 border-t border-white/10">
+                <p className="text-sm font-medium text-white truncate">{user.email}</p>
+                <p className="text-xs text-white/70">Signed in</p>
+              </div>
               <button
                 onClick={() => {
                   handleSignOut();
@@ -280,80 +292,13 @@ const Navbar: React.FC = () => {
             >
               <X size={24} />
             </button>
-            
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">
-              {isLogin ? 'Sign In' : 'Create Account'}
-            </h2>
-            
-            {error && (
-              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                {error}
-              </div>
-            )}
-            
-            <form onSubmit={handleAuth} className="space-y-4">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  id="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-              
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium py-2 px-4 rounded-lg hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-              >
-                {loading ? (
-                  <div className="flex items-center justify-center">
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  </div>
-                ) : isLogin ? (
-                  'Sign In'
-                ) : (
-                  'Sign Up'
-                )}
-              </button>
-              
-              <div className="text-center mt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsLogin(!isLogin)}
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  {isLogin
-                    ? "Don't have an account? Sign Up"
-                    : 'Already have an account? Sign In'}
-                </button>
-              </div>
-            </form>
+            <Auth onAuthSuccess={handleAuthSuccess} />
           </div>
         </div>
       )}
 
       <button
-        onClick={scrollToTop}
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
         className={`fixed bottom-8 right-4 bg-blue-600 text-white p-3 rounded-full shadow-lg transition-all duration-300 z-20 hover:bg-blue-700 transform hover:scale-110 ${
           showScrollTop ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'
         }`}

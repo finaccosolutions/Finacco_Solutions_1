@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { AlertCircle, Key, Loader2, Info, Trash2, RefreshCw } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { AlertCircle, Key, Loader2, Info, Trash2, RefreshCw, Home, MessageSquare } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -20,10 +20,9 @@ interface ApiKeySetupProps {
   returnUrl?: string;
 }
 
-// Retry configuration
 const RETRY_ATTEMPTS = 3;
-const INITIAL_RETRY_DELAY = 1000; // 1 second
-const MAX_TIMEOUT = 15000; // 15 seconds
+const INITIAL_RETRY_DELAY = 1000;
+const MAX_TIMEOUT = 15000;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -189,7 +188,6 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
         return;
       }
 
-      // Validate the API key before saving
       try {
         const validation = await validateApiKey(trimmedApiKey);
         if (!validation.isValid) {
@@ -216,7 +214,6 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
         throw insertError;
       }
 
-      // Verify the key was saved correctly
       const { data: savedKey, error: verifyError } = await supabase
         .from('api_keys')
         .select('gemini_key')
@@ -227,11 +224,9 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
         throw new Error('Failed to verify saved API key. Please try again.');
       }
       
-      // Set the API key in the window object
       window.__GEMINI_API_KEY = trimmedApiKey;
       setSuccess('API key saved successfully!');
       
-      // Wait a moment to show success message before redirecting
       setTimeout(() => {
         if (returnUrl) {
           navigate(returnUrl);
@@ -271,7 +266,6 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
 
       if (deleteError) throw deleteError;
 
-      // Clear the API key from window object
       window.__GEMINI_API_KEY = undefined;
       setExistingKey(false);
       setApiKey('');
@@ -398,6 +392,26 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete, returnUrl }) => {
                   )}
                 </button>
               )}
+
+              <div className="flex gap-4 mt-6">
+                {existingKey ? (
+                  <Link
+                    to="/tax-assistant"
+                    className="flex-1 bg-blue-50 text-blue-600 font-medium py-3 px-4 rounded-lg hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 flex items-center justify-center gap-2 border border-blue-200"
+                  >
+                    <MessageSquare className="w-5 h-5" />
+                    Go to Chat
+                  </Link>
+                ) : (
+                  <Link
+                    to="/"
+                    className="flex-1 bg-gray-50 text-gray-600 font-medium py-3 px-4 rounded-lg hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 flex items-center justify-center gap-2 border border-gray-200"
+                  >
+                    <Home className="w-5 h-5" />
+                    Back to Home
+                  </Link>
+                )}
+              </div>
             </div>
 
             <p className="mt-4 text-sm text-gray-500 text-center">
