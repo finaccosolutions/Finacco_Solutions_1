@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import ReactMarkdown from 'react-markdown';
-import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Settings } from 'lucide-react';
+import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare } from 'lucide-react';
+import OpenAI from 'openai';
 import Auth from './Auth';
-import ApiKeySetup from './ApiKeySetup';
 import { Link } from 'react-router-dom';
 
 interface Message {
@@ -23,17 +23,25 @@ interface ChatHistory {
   user_id: string;
 }
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
-    }
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
+let supabase = null;
+try {
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+    new URL(SUPABASE_URL);
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
-);
+} catch (error) {
+  console.error('Failed to initialize Supabase client:', error);
+}
+
+const openai = new OpenAI({
+  apiKey: OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true
+});
 
 const RATE_LIMIT_WINDOW = 60000;
 const MAX_REQUESTS_PER_WINDOW = 3;
@@ -83,7 +91,7 @@ const formatResponse = (text: string) => {
     text = formattedText;
   }
 
-  // Table formatting
+  // Table formatting using markdown-style |
   if (text.includes('|')) {
     const blocks = text.split('\n\n');
     const formattedBlocks = blocks.map(block => {
@@ -122,7 +130,7 @@ const formatResponse = (text: string) => {
     text = formattedBlocks.join('\n\n');
   }
 
-  // Code block formatting
+  // Code block formatting using ```
   text = text.replace(
     /```([^`]+)```/g,
     '<pre class="bg-gray-800 text-gray-100 rounded-lg p-4 my-4 overflow-x-auto"><code>$1</code></pre>'
@@ -132,7 +140,7 @@ const formatResponse = (text: string) => {
   text = text.replace(/\n\n/g, '</div>\n\n<div class="mb-4">');
   text = '<div class="mb-4">' + text + '</div>';
 
-  // Cleanup stray "*"
+  // Cleanup: remove stray "*" used incorrectly
   text = text.replace(/(^|\s)\*(?=\s|$)/g, '');
 
   return text;
@@ -196,94 +204,86 @@ Feel free to reach out to us through WhatsApp or email for quick responses.
 `;
   }
 
+  // Finacco Connect services
+  if (lowerQuery.includes('tally') || lowerQuery.includes('import') || lowerQuery.includes('connect') || lowerQuery.includes('utility software')) {
+    return `
+**Finacco Connect Services:**
+
+Visit [Finacco Connect](https://connect.finaccosolutions.com) for:
+* Tally Prime Solutions
+  - Sales and Implementation
+  - Training and Support
+  - Customization Services
+* Data Import Tools
+  - Bank Statement Import
+  - Tally Data Migration
+  - Excel to Tally Integration
+* Financial Statement Preparation
+* Bank Reconciliation Tools
+* Business Utility Software
+
+For detailed information or support:
+* Phone: +91 8590000761
+* Email: contact@finaccosolutions.com
+`;
+  }
+
+  // Finacco Advisory services
+  if (lowerQuery.includes('advisory') || lowerQuery.includes('financial services')) {
+    return `
+**Finacco Advisory Services:**
+
+Visit [Finacco Advisory](https://advisory.finaccosolutions.com) for:
+
+* GST Services:
+  - Registration
+  - Monthly/Quarterly Returns
+  - Annual Returns
+  - GST Audit Support
+  - E-way Bill Services
+
+* Income Tax Services:
+  - Individual Tax Filing
+  - Business Tax Returns
+  - Tax Planning
+  - TDS Returns
+  - Form 16/16A Generation
+
+* Business Services:
+  - Company Registration
+  - LLP Formation
+  - Business Consultancy
+  - Bookkeeping Services
+  - Financial Advisory
+
+Contact us for professional assistance:
+* Phone: +91 8590000761
+* Email: contact@finaccosolutions.com
+`;
+  }
+
   return null;
 };
 
 const TaxAssistant: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
-  const [needsApiKey, setNeedsApiKey] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
   const [showHistory, setShowHistory] = useState(true);
   const [isHistoryHovered, setIsHistoryHovered] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useGemini, setUseGemini] = useState(true);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [typingMessage, setTypingMessage] = useState<Message | null>(null);
   const [textareaHeight, setTextareaHeight] = useState('56px');
-  const [showApiKeySetup, setShowApiKeySetup] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestTimestamps = useRef<number[]>([]);
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (!supabase) return;
-    
-    const checkAuth = async () => {
-      try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) throw sessionError;
-        
-        setIsAuthenticated(!!session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          await checkApiKey(session.user.id);
-          await loadChatHistory(session.user.id);
-        }
-      } catch (error) {
-        console.error('Auth check error:', error);
-        setIsAuthenticated(false);
-        setUser(null);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkAuth();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setIsAuthenticated(!!session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        await checkApiKey(session.user.id);
-        await loadChatHistory(session.user.id);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const checkApiKey = async (userId: string) => {
-    try {
-      const { data: apiKey, error } = await supabase
-        .from('api_keys')
-        .select('gemini_key')
-        .eq('user_id', userId)
-        .maybeSingle();
-        
-      if (error) throw error;
-
-      if (apiKey?.gemini_key) {
-        window.__GEMINI_API_KEY = apiKey.gemini_key;
-        setNeedsApiKey(false);
-      } else {
-        setNeedsApiKey(true);
-      }
-    } catch (error) {
-      console.error('Error checking API key:', error);
-      setNeedsApiKey(true);
-    }
-  };
 
   const adjustTextareaHeight = () => {
     const textarea = textareaRef.current;
@@ -305,6 +305,42 @@ const TaxAssistant: React.FC = () => {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    if (!supabase) return;
+    
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAuthenticated(!!session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        loadChatHistory(session.user.id);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        loadChatHistory(session.user.id);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      setError('Supabase configuration is missing. Please check your environment variables.');
+      return;
+    }
+    if (!OPENAI_API_KEY && !GEMINI_API_KEY) {
+      setError('API keys are missing. Please check your environment variables.');
+      return;
+    }
+    scrollToBottom();
+  }, [messages]);
 
   const checkRateLimit = (): boolean => {
     const now = Date.now();
@@ -395,7 +431,7 @@ const TaxAssistant: React.FC = () => {
 
     setMessages(prev => [...prev, newMessage]);
     setInput('');
-    setIsSubmitting(true);
+    setIsLoading(true);
 
     const typingIndicator: Message = {
       id: (Date.now() + 1).toString(),
@@ -439,104 +475,131 @@ const TaxAssistant: React.FC = () => {
         return;
       }
 
-      // Check if Gemini API key is available and valid
-      if (!window.__GEMINI_API_KEY || typeof window.__GEMINI_API_KEY !== 'string' || !window.__GEMINI_API_KEY.startsWith('AIza')) {
-        setTypingMessage(null);
-        setError('Invalid or missing API key. Please check your API key in settings.');
-        setNeedsApiKey(true);
-        return;
-      }
-
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${window.__GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `You are a helpful and knowledgeable tax assistant in India. Reply to the following query with clear, concise, and accurate information focused only on the user's question. 
-                    Avoid introductions or general explanations unless directly related. 
-                    Use bullet points, tables, and section headings if helpful for clarity. 
-                    Keep the language simple and easy to understand, especially for non-experts.
-                    
-                    User's query: ${input}`
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 2048,
+      if (useGemini) {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
           },
-          safetySettings: [
-            {
-              category: "HARM_CATEGORY_HARASSMENT",
-              threshold: "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              category: "HARM_CATEGORY_HATE_SPEECH",
-              threshold: "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-              threshold: "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-              threshold: "BLOCK_MEDIUM_AND_ABOVE"
-            }
-          ]
-        })
-      });
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: `You are a helpful and knowledgeable tax assistant in India. Reply to the following query with clear, concise, and accurate information focused only on the user's question. 
+                      Avoid introductions or general explanations unless directly related. 
+                      Use bullet points, tables, and section headings if helpful for clarity. 
+                      Keep the language simple and easy to understand, especially for non-experts.
+                      
+                      User's query: ${input}`
+              }]
+            }]
+          })
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        if (errorData.error?.message?.includes('API key not valid')) {
-          setNeedsApiKey(true);
-          throw new Error('Invalid API key. Please enter a valid Gemini API key.');
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error('Gemini API endpoint not found. Switching to OpenAI...');
+          }
+          throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
         }
-        throw new Error(`Gemini API error: ${response.status} - ${JSON.stringify(errorData)}`);
+
+        const data = await response.json();
+        if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          throw new Error('Invalid response format from Gemini API');
+        }
+
+        let displayedContent = '';
+        const words = data.candidates[0].content.parts[0].text.split(' ');
+        
+        for (let i = 0; i < words.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+          displayedContent += words[i] + ' ';
+          setTypingMessage(prev => ({
+            ...prev!,
+            content: formatResponse(displayedContent)
+          }));
+        }
+
+        const text = formatResponse(data.candidates[0].content.parts[0].text);
+        
+        const assistantResponse: Message = {
+          id: typingIndicator.id,
+          role: 'assistant',
+          content: text,
+          timestamp: new Date().toISOString(),
+          name: 'Finacco Solutions'
+        };
+
+        setTypingMessage(null);
+        const updatedMessages = [...messages, newMessage, assistantResponse];
+        setMessages(updatedMessages);
+        await saveToHistory(updatedMessages, input);
+      } else {
+        const systemPrompt = `You are a knowledgeable tax assistant specializing in Indian GST and Income Tax. 
+        Format your responses with:
+        - Clear section headers (Overview, Details, Important Points)
+        - Bullet points for key information
+        - Tables for comparative data
+        - Examples where appropriate
+        Always cite relevant sections of tax laws.
+        If you're not completely sure about something, say so and recommend consulting a tax professional.`;
+
+        const completion = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo",
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...messages.map(msg => ({
+              role: msg.role as 'user' | 'assistant',
+              content: msg.content
+            })),
+            { role: "user", content: input }
+          ]
+        });
+
+        if (!completion.choices[0]?.message?.content) {
+          throw new Error('No response received from OpenAI');
+        }
+
+        let displayedContent = '';
+        const words = completion.choices[0].message.content.split(' ');
+        
+        for (let i = 0; i < words.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+          displayedContent += words[i] + ' ';
+          setTypingMessage(prev => ({
+            ...prev!,
+            content: formatResponse(displayedContent)
+          }));
+        }
+
+        const text = formatResponse(completion.choices[0].message.content);
+        
+        const assistantResponse: Message = {
+          id: typingIndicator.id,
+          role: 'assistant',
+          content: text,
+          timestamp: new Date().toISOString(),
+          name: 'Finacco Solutions'
+        };
+
+        setTypingMessage(null);
+        const updatedMessages = [...messages, newMessage, assistantResponse];
+        setMessages(updatedMessages);
+        await saveToHistory(updatedMessages, input);
       }
-
-      const data = await response.json();
-      if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        throw new Error('Invalid response format from Gemini API');
-      }
-
-      let displayedContent = '';
-      const words = data.candidates[0].content.parts[0].text.split(' ');
-      
-      for (let i = 0; i < words.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 50));
-        displayedContent += words[i] + ' ';
-        setTypingMessage(prev => ({
-          ...prev!,
-          content: formatResponse(displayedContent)
-        }));
-      }
-
-      const text = formatResponse(data.candidates[0].content.parts[0].text);
-      
-      const assistantResponse: Message = {
-        id: typingIndicator.id,
-        role: 'assistant',
-        content: text,
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions'
-      };
-
-      setTypingMessage(null);
-      const updatedMessages = [...messages, newMessage, assistantResponse];
-      setMessages(updatedMessages);
-      await saveToHistory(updatedMessages, input);
     } catch (error) {
       console.error('Error:', error);
       setTypingMessage(null);
       let errorMessage = 'An unexpected error occurred. Please try again later.';
       
       if (error instanceof Error) {
-        errorMessage = error.message;
+        if (error.message.includes('404') || error.message.includes('not found')) {
+          setUseGemini(false);
+          errorMessage = 'Gemini API is not available. Switched to OpenAI. Please try your question again.';
+        } else if (error.message.includes('429') || error.message.includes('quota exceeded')) {
+          errorMessage = 'You have reached the API rate limit. Please try again in a few minutes.';
+        } else {
+          errorMessage = error.message;
+        }
       }
       
       setError(errorMessage);
@@ -549,7 +612,7 @@ const TaxAssistant: React.FC = () => {
       };
       setMessages(prev => [...prev, errorResponse]);
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
@@ -642,33 +705,8 @@ const TaxAssistant: React.FC = () => {
     }, 300);
   };
 
-  const handleApiKeySetup = () => {
-    setShowApiKeySetup(true);
-  };
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="flex items-center gap-3">
-          <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-          <span className="text-gray-600">Loading...</span>
-        </div>
-      </div>
-    );
-  }
-
   if (!isAuthenticated) {
     return <Auth onAuthSuccess={() => setIsAuthenticated(true)} />;
-  }
-
-  if (needsApiKey || showApiKeySetup) {
-    return <ApiKeySetup onComplete={() => {
-      setNeedsApiKey(false);
-      setShowApiKeySetup(false);
-      if (user) {
-        checkApiKey(user.id);
-      }
-    }} />;
   }
 
   return (
@@ -827,14 +865,6 @@ const TaxAssistant: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-2 ml-4">
-              <button
-                onClick={handleApiKeySetup}
-                className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-                title="API Key Settings"
-              >
-                <Settings size={20} />
-                <span className="hidden sm:inline">API Key</span>
-              </button>
               <Link
                 to="/"
                 className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
@@ -955,7 +985,7 @@ const TaxAssistant: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if (input.trim() && !isSubmitting) {
+                    if (input.trim() && !isLoading) {
                       handleSubmit(e);
                     }
                   }
@@ -963,19 +993,19 @@ const TaxAssistant: React.FC = () => {
                 placeholder="Ask me about taxes... (Press Enter to send, Shift + Enter for new line)"
                 className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-all duration-300"
                 style={{ minHeight: '56px', maxHeight: '200px' }}
-                disabled={isSubmitting}
+                disabled={isLoading}
               />
             </div>
             <button
               type="submit"
-              disabled={isSubmitting || !input.trim()}
+              disabled={isLoading || !input.trim()}
               className={`px-4 sm:px-6 py-3 rounded-lg flex items-center gap-2 transition-all duration-300 transform hover:scale-105 flex-shrink-0 ${
-                isSubmitting || !input.trim()
+                isLoading || !input.trim()
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg'
               }`}
             >
-              {isSubmitting ? (
+              {isLoading ? (
                 <Loader2 className="animate-spin" size={20} />
               ) : (
                 <Send size={20} />
