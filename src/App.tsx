@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
@@ -13,45 +13,22 @@ const AppContent = () => {
   const location = useLocation();
   const isTaxAssistant = location.pathname === '/tax-assistant';
 
-  useEffect(() => {
-    // Remove any 'no preview available' messages
-    const removeNoPreviewMessages = () => {
-      const noPreviewMessages = document.querySelectorAll('[data-vite-dev-id="no-preview"]');
-      noPreviewMessages.forEach(message => message.remove());
-    };
-
-    // Initial cleanup
-    removeNoPreviewMessages();
-
-    // Set up observer to remove any dynamically added messages
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach(() => {
-        removeNoPreviewMessages();
-      });
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-
-    return () => observer.disconnect();
-  }, []);
-
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="flex flex-col min-h-screen overflow-x-hidden">
       {!isTaxAssistant && <Navbar />}
-      <Routes>
-        <Route path="/" element={
-          <>
-            <Hero />
-            <Services />
-            <About />
-            <Contact />
-          </>
-        } />
-        <Route path="/tax-assistant" element={<TaxAssistant />} />
-      </Routes>
+      <main className="flex-grow">
+        <Routes>
+          <Route path="/" element={
+            <div className="flex flex-col">
+              <Hero />
+              <Services />
+              <About />
+              <Contact />
+            </div>
+          } />
+          <Route path="/tax-assistant" element={<TaxAssistant />} />
+        </Routes>
+      </main>
       {!isTaxAssistant && (
         <>
           <Footer />
@@ -63,38 +40,8 @@ const AppContent = () => {
 };
 
 function App() {
-  useEffect(() => {
-    // Set document title
+  React.useEffect(() => {
     document.title = 'Finacco Solutions | Financial & Tech Services';
-    
-    // Remove any 'no preview available' messages
-    const removeNoPreviewMessages = () => {
-      const noPreviewMessages = document.querySelectorAll('[data-vite-dev-id="no-preview"]');
-      noPreviewMessages.forEach(message => message.remove());
-    };
-
-    // Initial cleanup
-    removeNoPreviewMessages();
-
-    // Set up observer to remove any dynamically added messages
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach(() => {
-        removeNoPreviewMessages();
-      });
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-
-    // Update title in any default title elements
-    const defaultTitleElement = document.querySelector('[data-default]');
-    if (defaultTitleElement) {
-      defaultTitleElement.textContent = 'Finacco Solutions | Financial & Tech Services';
-    }
-
-    return () => observer.disconnect();
   }, []);
 
   return (
