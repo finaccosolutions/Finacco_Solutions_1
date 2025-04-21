@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { AlertCircle, Key, Loader2 } from 'lucide-react';
 
@@ -19,44 +19,8 @@ interface ApiKeySetupProps {
 }
 
 const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
-
-  useEffect(() => {
-    checkExistingApiKey();
-  }, []);
-
-  const checkExistingApiKey = async () => {
-    try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) throw sessionError;
-      if (!session) {
-        throw new Error('No authenticated session');
-      }
-
-      const { data: apiKey, error: apiKeyError } = await supabase
-        .from('api_keys')
-        .select('gemini_key')
-        .eq('user_id', session.user.id)
-        .maybeSingle();
-
-      if (apiKeyError) throw apiKeyError;
-      
-      if (apiKey) {
-        onComplete();
-      }
-    } catch (error) {
-      console.error('Error checking API key:', error);
-      if (error instanceof Error && error.message.includes('authenticated')) {
-        // Handle authentication errors by redirecting to auth
-        window.location.reload();
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [error, setError] = useState<string | null>(null);
 
   const generateAndSaveApiKey = async () => {
     setGenerating(true);
@@ -83,26 +47,22 @@ const ApiKeySetup: React.FC<ApiKeySetupProps> = ({ onComplete }) => {
         });
 
       if (insertError) throw insertError;
+      
+      window.__GEMINI_API_KEY = apiKey;
       onComplete();
     } catch (error) {
       console.error('Error generating API key:', error);
-      if (error instanceof Error && error.message.includes('authenticated')) {
-        window.location.reload();
+      if (error instanceof Error) {
+        setError(error.message.includes('authenticated') 
+          ? 'Please sign in again.'
+          : 'Failed to generate API key. Please try again.');
       } else {
-        setError('Failed to generate API key. Please try again.');
+        setError('An unexpected error occurred.');
       }
     } finally {
       setGenerating(false);
     }
   };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white py-12 px-4 sm:px-6 lg:px-8">

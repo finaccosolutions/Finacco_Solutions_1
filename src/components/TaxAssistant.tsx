@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import ReactMarkdown from 'react-markdown';
 import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare } from 'lucide-react';
-import OpenAI from 'openai';
 import Auth from './Auth';
 import ApiKeySetup from './ApiKeySetup';
 import { Link } from 'react-router-dom';
@@ -24,18 +23,17 @@ interface ChatHistory {
   user_id: string;
 }
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-let supabase = null;
-try {
-  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-    new URL(SUPABASE_URL);
-    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
   }
-} catch (error) {
-  console.error('Failed to initialize Supabase client:', error);
-}
+);
 
 const RATE_LIMIT_WINDOW = 60000;
 const MAX_REQUESTS_PER_WINDOW = 3;
@@ -204,9 +202,11 @@ Feel free to reach out to us through WhatsApp or email for quick responses.
 const TaxAssistant: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
+  const [needsApiKey, setNeedsApiKey] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
   const [showHistory, setShowHistory] = useState(true);
   const [isHistoryHovered, setIsHistoryHovered] = useState(false);
@@ -215,54 +215,48 @@ const TaxAssistant: React.FC = () => {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [typingMessage, setTypingMessage] = useState<Message | null>(null);
   const [textareaHeight, setTextareaHeight] = useState('56px');
-  const [needsApiKey, setNeedsApiKey] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestTimestamps = useRef<number[]>([]);
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const adjustTextareaHeight = () => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-    }
-  };
-
-  useEffect(() => {
-    if (!input) {
-      const textarea = textareaRef.current;
-      if (textarea) {
-        textarea.style.height = '56px';
-      }
-    }
-  }, [input]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
     if (!supabase) return;
     
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsAuthenticated(!!session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadChatHistory(session.user.id);
-        checkApiKey(session.user.id);
+    const checkAuth = async () => {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) throw sessionError;
+        
+        setIsAuthenticated(!!session);
+        setUser(session?.user ?? null);
+        
+        if (session?.user) {
+          await checkApiKey(session.user.id);
+          await loadChatHistory(session.user.id);
+        }
+      } catch (error) {
+        console.error('Auth check error:', error);
+        setIsAuthenticated(false);
+        setUser(null);
+      } finally {
+        setIsLoading(false);
       }
-    });
+    };
+
+    checkAuth();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setIsAuthenticated(!!session);
       setUser(session?.user ?? null);
+      
       if (session?.user) {
-        loadChatHistory(session.user.id);
-        checkApiKey(session.user.id);
+        await checkApiKey(session.user.id);
+        await loadChatHistory(session.user.id);
       }
     });
 
@@ -292,6 +286,27 @@ const TaxAssistant: React.FC = () => {
       setUseGemini(false);
       setNeedsApiKey(true);
     }
+  };
+
+  const adjustTextareaHeight = () => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    }
+  };
+
+  useEffect(() => {
+    if (!input) {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        textarea.style.height = '56px';
+      }
+    }
+  }, [input]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const checkRateLimit = (): boolean => {
@@ -383,7 +398,7 @@ const TaxAssistant: React.FC = () => {
 
     setMessages(prev => [...prev, newMessage]);
     setInput('');
-    setIsLoading(true);
+    setIsSubmitting(true);
 
     const typingIndicator: Message = {
       id: (Date.now() + 1).toString(),
@@ -529,7 +544,7 @@ const TaxAssistant: React.FC = () => {
       };
       setMessages(prev => [...prev, errorResponse]);
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -621,6 +636,17 @@ const TaxAssistant: React.FC = () => {
       setIsHistoryHovered(false);
     }, 300);
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="flex items-center gap-3">
+          <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+          <span className="text-gray-600">Loading...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <Auth onAuthSuccess={() => setIsAuthenticated(true)} />;
@@ -911,7 +937,7 @@ const TaxAssistant: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if (input.trim() && !isLoading) {
+                    if (input.trim() && !isSubmitting) {
                       handleSubmit(e);
                     }
                   }
@@ -919,19 +945,19 @@ const TaxAssistant: React.FC = () => {
                 placeholder="Ask me about taxes... (Press Enter to send, Shift + Enter for new line)"
                 className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-all duration-300"
                 style={{ minHeight: '56px', maxHeight: '200px' }}
-                disabled={isLoading}
+                disabled={isSubmitting}
               />
             </div>
             <button
               type="submit"
-              disabled={isLoading || !input.trim()}
+              disabled={isSubmitting || !input.trim()}
               className={`px-4 sm:px-6 py-3 rounded-lg flex items-center gap-2 transition-all duration-300 transform hover:scale-105 flex-shrink-0 ${
-                isLoading || !input.trim()
+                isSubmitting || !input.trim()
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg'
               }`}
             >
-              {isLoading ? (
+              {isSubmitting ? (
                 <Loader2 className="animate-spin" size={20} />
               ) : (
                 <Send size={20} />

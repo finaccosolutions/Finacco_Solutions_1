@@ -14,11 +14,28 @@ const AppContent = () => {
   const isTaxAssistant = location.pathname === '/tax-assistant';
 
   useEffect(() => {
-    // Remove 'no preview available' message if it exists
-    const noPreviewMessage = document.querySelector('div[data-vite-dev-id="no-preview"]');
-    if (noPreviewMessage) {
-      noPreviewMessage.remove();
-    }
+    // Remove any 'no preview available' messages
+    const removeNoPreviewMessages = () => {
+      const noPreviewMessages = document.querySelectorAll('[data-vite-dev-id="no-preview"]');
+      noPreviewMessages.forEach(message => message.remove());
+    };
+
+    // Initial cleanup
+    removeNoPreviewMessages();
+
+    // Set up observer to remove any dynamically added messages
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach(() => {
+        removeNoPreviewMessages();
+      });
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    return () => observer.disconnect();
   }, []);
 
   return (
@@ -47,12 +64,37 @@ const AppContent = () => {
 
 function App() {
   useEffect(() => {
+    // Set document title
     document.title = 'Finacco Solutions | Financial & Tech Services';
     
+    // Remove any 'no preview available' messages
+    const removeNoPreviewMessages = () => {
+      const noPreviewMessages = document.querySelectorAll('[data-vite-dev-id="no-preview"]');
+      noPreviewMessages.forEach(message => message.remove());
+    };
+
+    // Initial cleanup
+    removeNoPreviewMessages();
+
+    // Set up observer to remove any dynamically added messages
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach(() => {
+        removeNoPreviewMessages();
+      });
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    // Update title in any default title elements
     const defaultTitleElement = document.querySelector('[data-default]');
     if (defaultTitleElement) {
       defaultTitleElement.textContent = 'Finacco Solutions | Financial & Tech Services';
     }
+
+    return () => observer.disconnect();
   }, []);
 
   return (
