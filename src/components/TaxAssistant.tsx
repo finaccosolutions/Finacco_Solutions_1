@@ -460,18 +460,17 @@ const TaxAssistant: React.FC = () => {
     setDocumentType(query.replace(/^(draft|create|generate|write)\s+an?\s+/i, '').trim());
     
     try {
-      const fieldsPrompt = `You are a document drafting assistant. For a ${documentType}, list only the required fields/information needed to create this document. Respond in this exact JSON format:
+      const fieldsPrompt = `For a ${documentType}, list the required fields as a JSON object with this exact structure:
       {
         "fields": [
           {
             "id": "field_1",
-            "label": "Field label",
+            "label": "Field Name",
             "type": "text",
             "required": true
           }
         ]
-      }
-      Keep it focused and essential. No explanation needed.`;
+      }`;
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey || GEMINI_API_KEY}`,
@@ -479,15 +478,39 @@ const TaxAssistant: React.FC = () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: fieldsPrompt }] }]
+            contents: [{ parts: [{ text: fieldsPrompt }] }],
+            generationConfig: {
+              temperature: 0.1,
+              topK: 1,
+              topP: 1,
+              maxOutputTokens: 1000,
+            }
           })
         }
       );
 
-      if (!response.ok) throw new Error('Failed to get document fields');
-      
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+
       const data = await response.json();
-      const fieldsData = JSON.parse(data.candidates[0].content.parts[0].text);
+      if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        throw new Error('Invalid response format from API');
+      }
+
+      const responseText = data.candidates[0].content.parts[0].text;
+      
+      // Find the JSON object in the response text
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON object found in response');
+      }
+
+      const fieldsData = JSON.parse(jsonMatch[0]);
+      if (!fieldsData.fields || !Array.isArray(fieldsData.fields)) {
+        throw new Error('Invalid fields data structure');
+      }
+
       setDocumentFields(fieldsData.fields);
       setCurrentFieldIndex(0);
       
@@ -504,6 +527,8 @@ const TaxAssistant: React.FC = () => {
       console.error('Error getting document fields:', error);
       setError('Failed to initialize document drafting. Please try again.');
       setIsDocumentMode(false);
+      setDocumentFields([]);
+      setCurrentFieldIndex(-1);
     }
   };
 
@@ -587,7 +612,7 @@ const TaxAssistant: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || isLoading) return;
 
     if (!checkRateLimit()) return;
 
