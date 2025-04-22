@@ -1,15 +1,15 @@
+// tailwind.config.js
+import plugin from 'tailwindcss/plugin';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
-    extend: {
-      minHeight: {
-        screen: ['100vh', '100dvh'],
-      },
-    },
+    extend: {},
   },
   plugins: [
-    require('@tailwindcss/typography'),
-    require('@tailwindcss/forms'),
+    plugin(function({ addUtilities }) {
+      // your custom utilities here (if any)
+    })
   ],
 };

@@ -414,7 +414,11 @@ const handleDocumentRequest = async (query: string) => {
   setError(null);
 
   try {
-    // Ask Gemini what fields are needed for this document
+    // Extract document type from query
+    const docType = query.replace(/(draft|create|generate|write)\s+(a|an)?\s*/i, '').trim();
+    setDocumentType(docType);
+    
+    // Get required fields from Gemini
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
@@ -423,11 +427,9 @@ const handleDocumentRequest = async (query: string) => {
         body: JSON.stringify({
           contents: [{
             parts: [{
-              text: `User wants to create a document based on: "${query}". 
-              What type of document is this? 
-              What fields are needed? Respond in JSON format:
+              text: `What fields are needed to create a ${docType}? 
+              Respond in JSON format:
               {
-                "documentType": "string",
                 "fields": [
                   {
                     "id": "string",
@@ -447,26 +449,20 @@ const handleDocumentRequest = async (query: string) => {
 
     const data = await response.json();
     const resultText = data.candidates[0]?.content?.parts?.[0]?.text;
-    
-    // Extract JSON from response (Gemini might add markdown or other formatting)
-    const jsonStart = resultText.indexOf('{');
-    const jsonEnd = resultText.lastIndexOf('}') + 1;
-    const jsonString = resultText.slice(jsonStart, jsonEnd);
-    const result = JSON.parse(jsonString);
+    const jsonMatch = resultText.match(/{[\s\S]*}/);
+    const result = jsonMatch ? JSON.parse(jsonMatch[0]) : { fields: [] };
 
-    setDocumentType(result.documentType);
-    setFormFields(result.fields);
+    setFormFields(result.fields.length > 0 ? result.fields : getDefaultFields(docType));
     setShowForm(true);
     
     const assistantMessage: Message = {
       id: Date.now().toString(),
       role: 'assistant',
-      content: `Let's create a ${result.documentType}. Please fill in the required information:`,
+      content: `Let's create a ${docType}. Please provide the following information:`,
       timestamp: new Date().toISOString()
     };
     
     setMessages(prev => [...prev, assistantMessage]);
-
   } catch (error) {
     console.error('Error setting up document form:', error);
     setError('Failed to set up document form. Please try again.');
@@ -476,48 +472,160 @@ const handleDocumentRequest = async (query: string) => {
   }
 };
 
-const generateDocument = async (data: Record<string, string>, docType: string) => {
-  console.log('Starting document generation with:', { data, docType }); // Add this
-  
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `Create a professional ${docType} document using this data:
-              ${JSON.stringify(data)}
-              
-              Respond with the HTML content for the document wrapped in <document></document> tags`
-            }]
-          }]
-        })
-      }
-    );
+// Fallback fields if AI fails
+const getDefaultFields = (docType: string): DocumentField[] => [
+  {
+    id: 'title',
+    label: 'Document Title',
+    type: 'text',
+    required: true,
+    placeholder: `Enter ${docType} title`
+  },
+  {
+    id: 'parties',
+    label: 'Parties Involved',
+    type: 'textarea',
+    required: true,
+    placeholder: 'List all parties involved'
+  },
+  {
+    id: 'details',
+    label: 'Document Details',
+    type: 'textarea',
+    required: true,
+    placeholder: 'Enter all relevant details'
+  },
+  {
+    id: 'date',
+    label: 'Effective Date',
+    type: 'date',
+    required: true
+  }
+];
 
-    console.log('API response status:', response.status); // Add this
-    
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
+const generateDocument = async (data: Record<string, string>, docType: string) => {
+  try {
+    // First try AI generation with strict instructions
+    try {
+      const aiContent = await generateWithAI(data, docType);
+      if (aiContent) return aiContent;
+    } catch (aiError) {
+      console.warn("AI generation failed, using fallback", aiError);
     }
 
-    const result = await response.json();
-    console.log('API response:', result); // Add this
-    
-    const content = result.candidates[0]?.content?.parts?.[0]?.text;
-    console.log('Raw content:', content); // Add this
-    
-    const docContent = content.match(/<document>(.*?)<\/document>/s)?.[1] || content;
-    console.log('Extracted content:', docContent); // Add this
-    
-    return docContent;
+    // Fallback to robust template
+    return generateFallbackDocument(data, docType);
   } catch (error) {
-    console.error('Error in generateDocument:', error);
-    throw error;
+    console.error("Document generation error:", error);
+    throw new Error("Failed to generate document. Please try again.");
   }
+};
+
+const generateWithAI = async (data: Record<string, string>, docType: string) => {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: `Create a professional ${docType} document in HTML format using EXACTLY this data:
+            ${JSON.stringify(data)}
+            
+            Requirements:
+            1. Use standard business document structure
+            2. Include all user data in proper sections
+            3. Add professional styling with inline CSS
+            4. Include signature lines if appropriate
+            5. Format dates and numbers properly
+            
+            Return ONLY the HTML with:
+            - Proper headings
+            - Organized sections
+            - All user data incorporated
+            - No placeholder text`
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.3 // More deterministic output
+        }
+      })
+    }
+  );
+
+  if (!response.ok) throw new Error("API request failed");
+  
+  const result = await response.json();
+  const content = result.candidates[0]?.content?.parts?.[0]?.text;
+  return content.replace(/^```html|```$/g, "").trim();
+};
+
+const generateFallbackDocument = (data: Record<string, string>, docType: string) => {
+  const currentDate = new Date().toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  });
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .document { max-width: 800px; margin: 0 auto; padding: 30px; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #eee; padding-bottom: 20px; }
+        h1 { color: #2c3e50; margin-bottom: 10px; }
+        .section { margin-bottom: 25px; }
+        .section-title { border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 15px; color: #2c3e50; }
+        .field { margin-bottom: 15px; }
+        .field-label { font-weight: bold; display: block; margin-bottom: 5px; }
+        .signatures { display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; }
+        .signature-box { width: 45%; }
+        .signature-line { border-top: 1px solid #ccc; margin-top: 30px; padding-top: 5px; }
+      </style>
+    </head>
+    <body>
+      <div class="document">
+        <div class="header">
+          <h1>${docType.toUpperCase()}</h1>
+          <p>Date: ${currentDate}</p>
+        </div>
+        
+        ${Object.entries(data)
+          .filter(([_, value]) => value)
+          .map(([key, value]) => `
+            <div class="section">
+              <h3 class="section-title">${formatFieldLabel(key)}</h3>
+              <div class="field-content">
+                ${value.split("\n").map(para => `<p>${para}</p>`).join("")}
+              </div>
+            </div>
+          `).join("")}
+        
+        <div class="signatures">
+          <div class="signature-box">
+            <div class="signature-line">Authorized Signature</div>
+            <p>Date: _______________</p>
+          </div>
+          <div class="signature-box">
+            <div class="signature-line">Recipient Signature</div>
+            <p>Date: _______________</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+const formatFieldLabel = (key: string) => {
+  return key
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, str => str.toUpperCase())
+    .replace(/([a-z])([A-Z])/g, "$1 $2");
 };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -709,30 +817,57 @@ const generateDocument = async (data: Record<string, string>, docType: string) =
     scrollToBottom();
   }, [messages]);
 
+// Add this useEffect with your other hooks
 useEffect(() => {
-  window.downloadDocument = (content: string, docType: string) => {
-    console.log('Attempting to download:', { docType }); // Add this
-    
+  const handleDownload = (htmlContent: string, fileName: string) => {
     try {
-      const element = document.createElement('div');
-      element.innerHTML = content;
-      console.log('Created element:', element); // Add this
+      // Create a hidden iframe for printing
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.srcdoc = htmlContent;
       
-      const opt = {
-        margin: 1,
-        filename: `${docType.toLowerCase().replace(/\s+/g, '_')}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2 },
-        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      document.body.appendChild(iframe);
+      
+      iframe.onload = () => {
+        setTimeout(() => {
+          const opt = {
+            margin: 10,
+            filename: `${fileName.replace(/[^a-z0-9]/gi, "_")}.pdf`,
+            image: { type: "jpeg", quality: 0.98 },
+            html2canvas: { 
+              scale: 2,
+              logging: true,
+              useCORS: true,
+              allowTaint: true
+            },
+            jsPDF: { 
+              unit: "mm",
+              format: "a4",
+              orientation: "portrait" 
+            }
+          };
+          
+          html2pdf()
+            .set(opt)
+            .from(iframe.contentDocument?.body || document.body)
+            .save()
+            .finally(() => {
+              document.body.removeChild(iframe);
+            });
+        }, 500);
       };
-
-      console.log('PDF options:', opt); // Add this
-      html2pdf().set(opt).from(element).save();
-      console.log('Download initiated'); // Add this
     } catch (error) {
-      console.error('Download error:', error);
+      console.error("Download failed:", error);
+      alert("Failed to generate PDF. Please try again.");
     }
   };
+
+  window.downloadDocument = handleDownload;
 
   return () => {
     delete window.downloadDocument;
