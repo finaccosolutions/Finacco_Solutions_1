@@ -289,6 +289,118 @@ const TaxAssistant: React.FC = () => {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!input.trim() || isLoading) return;
+    
+    if (!checkRateLimit()) return;
+    
+    setIsLoading(true);
+    setError(null);
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input,
+      timestamp: new Date().toISOString(),
+      name: user?.email?.split('@')[0]
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+
+    try {
+      // Check for document generation requests
+      if (/^(draft|create|generate|write)\s+an?\s+/i.test(input)) {
+        await handleDocumentRequest(input);
+        return;
+      }
+
+      // Check for Finacco-specific responses
+      const finaccoResponse = getFinaccoResponse(input);
+      if (finaccoResponse) {
+        const assistantMessage: Message = {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: formatResponse(finaccoResponse),
+          timestamp: new Date().toISOString(),
+          name: 'Finacco Solutions'
+        };
+        
+        setMessages(prev => [...prev, assistantMessage]);
+        await saveToHistory([...messages, userMessage, assistantMessage], input);
+        return;
+      }
+
+      // Set up typing animation
+      const typingMessageId = Date.now().toString();
+      setTypingMessage({
+        id: typingMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions',
+        isTyping: true
+      });
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `You are a tax and financial advisor assistant for Finacco Solutions. Respond to this query professionally and accurately: ${input}`
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.7,
+              topK: 1,
+              topP: 1,
+              maxOutputTokens: 2048,
+            }
+          })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        throw new Error('Invalid response format from API');
+      }
+
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: formatResponse(data.candidates[0].content.parts[0].text),
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions'
+      };
+
+      setTypingMessage(null);
+      setMessages(prev => [...prev, assistantMessage]);
+      await saveToHistory([...messages, userMessage, assistantMessage], input);
+
+    } catch (error) {
+      console.error('Error processing request:', error);
+      setError('Failed to process your request. Please try again.');
+      setMessages(prev => prev.filter(msg => msg.id !== userMessage.id));
+    } finally {
+      setIsLoading(false);
+      setTypingMessage(null);
+    }
+  };
+
   const adjustTextareaHeight = () => {
     const textarea = textareaRef.current;
     if (textarea) {
@@ -798,6 +910,7 @@ const TaxAssistant: React.FC = () => {
         onMouseEnter={handleHistoryMouseEnter}
         onMouseLeave={handleHistoryMouseLeave}
       >
+        
         <div className="flex-1 overflow-hidden">
           <div className={`flex items-center justify-end p-4 ${showHistory ? 'justify-between' : 'justify-center'}`}>
             {showHistory && (
@@ -1121,5 +1234,3 @@ const TaxAssistant: React.FC = () => {
 };
 
 export default TaxAssistant;
-
-export default TaxAssistant
