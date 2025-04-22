@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Key } from 'lucide-react';
+import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Key, Download } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import html2pdf from 'html2pdf.js';
 import Auth from './Auth';
 import ApiKeySetup from './ApiKeySetup';
 import { supabase } from '../lib/supabase';
@@ -13,6 +14,7 @@ interface Message {
   timestamp: string;
   name?: string;
   isTyping?: boolean;
+  isDocument?: boolean;
 }
 
 interface ChatHistory {
@@ -21,6 +23,14 @@ interface ChatHistory {
   messages: Message[];
   created_at: string;
   user_id: string;
+}
+
+interface DocumentField {
+  id: string;
+  label: string;
+  type: string;
+  required: boolean;
+  value?: string;
 }
 
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
@@ -263,6 +273,11 @@ const TaxAssistant: React.FC = () => {
   const [typingMessage, setTypingMessage] = useState<Message | null>(null);
   const [textareaHeight, setTextareaHeight] = useState('56px');
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [isDocumentMode, setIsDocumentMode] = useState(false);
+  const [documentType, setDocumentType] = useState('');
+  const [documentFields, setDocumentFields] = useState<DocumentField[]>([]);
+  const [currentFieldIndex, setCurrentFieldIndex] = useState(-1);
+  const [collectedData, setCollectedData] = useState<Record<string, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestTimestamps = useRef<number[]>([]);
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -420,6 +435,156 @@ const TaxAssistant: React.FC = () => {
     }
   };
 
+  const downloadDocument = async (content: string) => {
+    const element = document.createElement('div');
+    element.innerHTML = content;
+    
+    const opt = {
+      margin: 1,
+      filename: `${documentType.toLowerCase().replace(/\s+/g, '_')}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+    };
+
+    try {
+      await html2pdf().set(opt).from(element).save();
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      setError('Failed to generate PDF. Please try again.');
+    }
+  };
+
+  const handleDocumentRequest = async (query: string) => {
+    setIsDocumentMode(true);
+    setDocumentType(query.replace(/^(draft|create|generate|write)\s+an?\s+/i, '').trim());
+    
+    try {
+      const fieldsPrompt = `You are a document drafting assistant. For a ${documentType}, list only the required fields/information needed to create this document. Respond in this exact JSON format:
+      {
+        "fields": [
+          {
+            "id": "field_1",
+            "label": "Field label",
+            "type": "text",
+            "required": true
+          }
+        ]
+      }
+      Keep it focused and essential. No explanation needed.`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey || GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: fieldsPrompt }] }]
+          })
+        }
+      );
+
+      if (!response.ok) throw new Error('Failed to get document fields');
+      
+      const data = await response.json();
+      const fieldsData = JSON.parse(data.candidates[0].content.parts[0].text);
+      setDocumentFields(fieldsData.fields);
+      setCurrentFieldIndex(0);
+      
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `Please provide the ${fieldsData.fields[0].label}:`,
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions'
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+    } catch (error) {
+      console.error('Error getting document fields:', error);
+      setError('Failed to initialize document drafting. Please try again.');
+      setIsDocumentMode(false);
+    }
+  };
+
+  const handleFieldInput = async (input: string) => {
+    const currentField = documentFields[currentFieldIndex];
+    setCollectedData(prev => ({ ...prev, [currentField.id]: input }));
+
+    if (currentFieldIndex < documentFields.length - 1) {
+      setCurrentFieldIndex(currentFieldIndex + 1);
+      const nextField = documentFields[currentFieldIndex + 1];
+      
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `Please provide the ${nextField.label}:`,
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions'
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+    } else {
+      // Generate document
+      try {
+        const documentPrompt = `Generate a formal ${documentType} using this information:
+        ${Object.entries(collectedData)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join('\n')}
+        
+        Format it professionally with proper sections and legal language.`;
+
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey || GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: documentPrompt }] }]
+            })
+          }
+        );
+
+        if (!response.ok) throw new Error('Failed to generate document');
+        
+        const data = await response.json();
+        const documentContent = data.candidates[0].content.parts[0].text;
+        
+        const assistantMessage: Message = {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: `
+            <div class="space-y-4">
+              <div class="prose max-w-none">
+                ${documentContent}
+              </div>
+              <button
+                onclick="downloadDocument('${documentContent.replace(/'/g, "\\'")}')"
+                class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <span>Download PDF</span>
+                <Download size={16} />
+              </button>
+            </div>
+          `,
+          timestamp: new Date().toISOString(),
+          name: 'Finacco Solutions',
+          isDocument: true
+        };
+        
+        setMessages(prev => [...prev, assistantMessage]);
+        setIsDocumentMode(false);
+        setDocumentFields([]);
+        setCurrentFieldIndex(-1);
+        setCollectedData({});
+      } catch (error) {
+        console.error('Error generating document:', error);
+        setError('Failed to generate document. Please try again.');
+        setIsDocumentMode(false);
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
@@ -439,6 +604,21 @@ const TaxAssistant: React.FC = () => {
     setMessages(prev => [...prev, newMessage]);
     setInput('');
     setIsLoading(true);
+
+    // Check if this is a document drafting request
+    const isDraftRequest = /^(draft|create|generate|write)\s+an?\s+/i.test(input.trim());
+    
+    if (isDraftRequest) {
+      await handleDocumentRequest(input);
+      setIsLoading(false);
+      return;
+    }
+
+    if (isDocumentMode) {
+      await handleFieldInput(input);
+      setIsLoading(false);
+      return;
+    }
 
     const typingIndicator: Message = {
       id: (Date.now() + 1).toString(),
@@ -1051,5 +1231,3 @@ const TaxAssistant: React.FC = () => {
 };
 
 export default TaxAssistant;
-
-export default TaxAssistant
