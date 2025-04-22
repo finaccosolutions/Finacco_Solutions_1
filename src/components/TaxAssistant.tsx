@@ -361,10 +361,6 @@ const TaxAssistant: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!OPENAI_API_KEY && !GEMINI_API_KEY) {
-      setError('API keys are missing. Please check your environment variables.');
-      return;
-    }
     scrollToBottom();
   }, [messages]);
 
@@ -473,7 +469,7 @@ const TaxAssistant: React.FC = () => {
       }`;
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey || GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -560,7 +556,7 @@ const TaxAssistant: React.FC = () => {
         Format it professionally with proper sections and legal language.`;
 
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey || GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -688,7 +684,7 @@ const TaxAssistant: React.FC = () => {
       }
 
       if (useGemini) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey || GEMINI_API_KEY}`, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -832,6 +828,7 @@ const TaxAssistant: React.FC = () => {
       setMessages(prev => [...prev, errorResponse]);
     } finally {
       setIsLoading(false);
+    
     }
   };
 
