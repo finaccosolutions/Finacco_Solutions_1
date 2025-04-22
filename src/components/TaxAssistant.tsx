@@ -139,113 +139,6 @@ const formatResponse = (text: string) => {
   return text;
 };
 
-const formatDocumentContent = (content: string) => {
-  content = content.replace(/^#+\s+/gm, '');
-  content = content.replace(/\*\*/g, '');
-  
-  content = content.replace(/^(AGREEMENT|DEED|CONTRACT|NOTICE)/gm, '<h1 class="text-2xl font-bold text-center mb-6">$1</h1>');
-  content = content.replace(/^(Article|Section|Clause)\s+(\d+|[IVX]+)[:\.]/gm, '<h2 class="text-xl font-semibold mt-6 mb-4">$1 $2:</h2>');
-  content = content.replace(/^([A-Z][A-Z\s]+)(?=\n)/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
-  
-  content = content.split('\n\n').map(para => 
-    `<p class="mb-4 text-justify">${para.trim()}</p>`
-  ).join('\n');
-  
-  content = content.replace(
-    /(IN WITNESS WHEREOF[\s\S]*$)/,
-    '<div class="mt-8 border-t pt-6">$1</div>'
-  );
-  
-  content = content.replace(
-    /(_+\n?)?(Signature of [^<]+)/g,
-    '<div class="mt-6">\n<div class="border-b border-black w-48 mb-2"></div>\n<div class="font-medium">$2</div></div>'
-  );
-
-  return `
-    <div class="bg-white p-8 rounded-lg shadow-lg max-w-4xl mx-auto">
-      ${content}
-    </div>
-  `;
-};
-
-interface DocumentFormProps {
-  fields: DocumentField[];
-  onSubmit: (data: Record<string, string>) => void;
-  onCancel: () => void;
-}
-
-const DocumentForm: React.FC<DocumentFormProps> = ({ fields, onSubmit, onCancel }) => {
-  const [formData, setFormData] = useState<Record<string, string>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newErrors: Record<string, string> = {};
-    fields.forEach(field => {
-      if (field.required && !formData[field.id]) {
-        newErrors[field.id] = `${field.label} is required`;
-      }
-    });
-
-    if (Object.keys(newErrors).length === 0) {
-      onSubmit(formData);
-    } else {
-      setErrors(newErrors);
-    }
-  };
-
-  return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
-      <h2 className="text-xl font-semibold mb-4">Enter Document Details</h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {fields.map(field => (
-          <div key={field.id}>
-            <label htmlFor={field.id} className="block text-sm font-medium text-gray-700 mb-1">
-              {field.label}
-              {field.required && <span className="text-red-500">*</span>}
-            </label>
-            {field.type === 'textarea' ? (
-              <textarea
-                id={field.id}
-                value={formData[field.id] || ''}
-                onChange={e => setFormData({ ...formData, [field.id]: e.target.value })}
-                className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                rows={4}
-              />
-            ) : (
-              <input
-                id={field.id}
-                type={field.type}
-                value={formData[field.id] || ''}
-                onChange={e => setFormData({ ...formData, [field.id]: e.target.value })}
-                className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            )}
-            {errors[field.id] && (
-              <p className="text-sm text-red-500 mt-1">{errors[field.id]}</p>
-            )}
-          </div>
-        ))}
-        <div className="flex justify-end gap-3 mt-6">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700"
-          >
-            Generate Document
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-};
-
 const getFinaccoResponse = (query: string) => {
   const lowerQuery = query.toLowerCase();
   
@@ -563,19 +456,29 @@ const TaxAssistant: React.FC = () => {
     setDocumentType(query.replace(/^(draft|create|generate|write)\s+an?\s+/i, '').trim());
     
     try {
-      const fieldsPrompt = `For a ${documentType}, list the required fields as a JSON object with this structure:
+      const fieldsPrompt = `For a ${documentType}, list the required fields as a JSON object with this exact structure:
       {
         "fields": [
           {
             "id": "field_1",
             "label": "Field Name",
-            "type": "text|date|textarea",
+            "type": "text",
             "required": true
           }
         ]
       }
       
-      Include all necessary fields for a legally valid document. For example, if it's a rent agreement, include fields like landlord's name, address, tenant details, rent amount, etc.`;
+      For example, if it's a rent agreement, include fields like:
+      - Landlord's Name
+      - Landlord's Address
+      - Tenant's Name
+      - Tenant's Address
+      - Monthly Rent Amount
+      - Security Deposit
+      - Lease Start Date
+      - Lease Duration
+      
+      Make sure to include all necessary fields for a legally valid document.`;
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
@@ -599,132 +502,777 @@ const TaxAssistant: React.FC = () => {
       }
 
       const data = await response.json();
+      if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        throw new Error('Invalid response format from API');
+      }
+
       const responseText = data.candidates[0].content.parts[0].text;
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       
+      // Find the JSON object in the response text
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('No JSON object found in response');
       }
 
       const fieldsData = JSON.parse(jsonMatch[0]);
-      
-      const formComponent = (
-        <DocumentForm
-          fields={fieldsData.fields}
-          onSubmit={handleFormSubmit}
-          onCancel={() => {
-            setIsDocumentMode(false);
-            setDocumentFields([]);
-          }}
-        />
-      );
+      if (!fieldsData.fields || !Array.isArray(fieldsData.fields)) {
+        throw new Error('Invalid fields data structure');
+      }
 
       setDocumentFields(fieldsData.fields);
-      setMessages(prev => [...prev, {
+      setCurrentFieldIndex(0);
+      
+      const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: `<div class="w-full max-w-4xl mx-auto">${ReactDOMServer.renderToString(formComponent)}</div>`,
+        content: `Let's create a ${documentType}. Please provide the ${fieldsData.fields[0].label}:`,
         timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions',
-        isDocument: true
-      }]);
+        name: 'Finacco Solutions'
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
       console.error('Error getting document fields:', error);
       setError('Failed to initialize document drafting. Please try again.');
       setIsDocumentMode(false);
       setDocumentFields([]);
+      setCurrentFieldIndex(-1);
     }
   };
 
-  const handleFormSubmit = async (formData: Record<string, string>) => {
-    try {
-      const documentPrompt = `Create a formal ${documentType} using this information:
-        ${Object.entries(formData)
+  const handleFieldInput = async (input: string) => {
+    const currentField = documentFields[currentFieldIndex];
+    setCollectedData(prev => ({ ...prev, [currentField.id]: input }));
+
+    if (currentFieldIndex < documentFields.length - 1) {
+      setCurrentFieldIndex(currentFieldIndex + 1);
+      const nextField = documentFields[currentFieldIndex + 1];
+      
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `Please provide the ${nextField.label}:`,
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions'
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+    } else {
+      // Generate document
+      try {
+        const documentPrompt = `Create a formal ${documentType} using this information:
+        ${Object.entries(collectedData)
           .map(([key, value]) => {
             const field = documentFields.find(f => f.id === key);
             return `${field?.label}: ${value}`;
           })
           .join('\n')}
         
-        Format it as a proper legal document with appropriate sections, clauses, and signature blocks.
-        Do not use any markdown formatting.`;
+        Format it professionally with proper sections, legal language, and all necessary clauses.
+        Include spaces for signatures at the bottom.
+        Make it look like a real legal document.`;
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: documentPrompt }] }]
-          })
-        }
-      );
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: documentPrompt }] }]
+            })
+          }
+        );
 
-      if (!response.ok) throw new Error('Failed to generate document');
-      
-      const data = await response.json();
-      const documentContent = formatDocumentContent(data.candidates[0].content.parts[0].text);
-      
-      const documentHtml = `
-        <div class="space-y-4">
-          ${documentContent}
-          <div class="flex justify-center mt-6">
+        if (!response.ok) throw new Error('Failed to generate document');
+        
+        const data = await response.json();
+        const documentContent = data.candidates[0].content.parts[0].text;
+        
+        const formattedContent = `
+          <div class="space-y-4">
+            <div class="prose max-w-none">
+              ${documentContent}
+            </div>
             <button
-              onclick="window.downloadDocument('${documentType}', \`${documentContent.replace(/`/g, '\\`')}\`)"
-              class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              onclick="downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`)"
+              class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
-              Download PDF
+              <span>Download PDF</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
             </button>
           </div>
-        </div>
-      `;
+        `;
 
-      // Add the download function to the window object
-      window.downloadDocument = (type: string, content: string) => {
-        const element = document.createElement('div');
-        element.innerHTML = content;
-        
-        const opt = {
-          margin: 1,
-          filename: `${type.toLowerCase().replace(/\s+/g, '_')}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2 },
-          jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+        const assistantMessage: Message = {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: formattedContent,
+          timestamp: new Date().toISOString(),
+          name: 'Finacco Solutions',
+          isDocument: true
         };
-
-        html2pdf().set(opt).from(element).save();
-      };
-
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: documentHtml,
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions',
-        isDocument: true
-      }]);
-
-      setIsDocumentMode(false);
-      setDocumentFields([]);
-    } catch (error) {
-      console.error('Error generating document:', error);
-      setError('Failed to generate document. Please try again.');
-      setIsDocumentMode(false);
+        
+        setMessages(prev => [...prev, assistantMessage]);
+        setIsDocumentMode(false);
+        setDocumentFields([]);
+        setCurrentFieldIndex(-1);
+        setCollectedData({});
+      } catch (error) {
+        console.error('Error generating document:', error);
+        setError('Failed to generate document. Please try again.');
+        setIsDocumentMode(false);
+      }
     }
   };
 
-  // ... (keep all existing JSX and other functions)
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+
+    if (!checkRateLimit()) return;
+
+    setError(null);
+    const userName = user?.email?.split('@')[0] || 'User';
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input,
+      timestamp: new Date().toISOString(),
+      name: userName
+    };
+
+    setMessages(prev => [...prev, newMessage]);
+    setInput('');
+    setIsLoading(true);
+
+    // Check if this is a document drafting request
+    const isDraftRequest = /^(draft|create|generate|write)\s+an?\s+/i.test(input.trim());
+    
+    if (isDraftRequest) {
+      await handleDocumentRequest(input);
+      setIsLoading(false);
+      return;
+    }
+
+    if (isDocumentMode) {
+      await handleFieldInput(input);
+      setIsLoading(false);
+      return;
+    }
+
+    const typingIndicator: Message = {
+      id: (Date.now() + 1).toString(),
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      name: 'Finacco Solutions',
+      isTyping: true
+    };
+    setTypingMessage(typingIndicator);
+
+    try {
+      const finaccoResponse = getFinaccoResponse(input);
+      
+      if (finaccoResponse) {
+        let displayedContent = '';
+        const words = finaccoResponse.split(' ');
+        
+        for (let i = 0; i < words.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+          displayedContent += words[i] + ' ';
+          setTypingMessage(prev => ({
+            ...prev!,
+            content: formatResponse(displayedContent)
+          }));
+        }
+
+        const assistantResponse: Message = {
+          id: typingIndicator.id,
+          role: 'assistant',
+          content: formatResponse(finaccoResponse),
+          timestamp: new Date().toISOString(),
+          name: 'Finacco Solutions'
+        };
+        
+        setTypingMessage(null);
+        const updatedMessages = [...messages, newMessage, assistantResponse];
+        setMessages(updatedMessages);
+        
+        await saveToHistory(updatedMessages, input);
+        return;
+      }
+
+      if (useGemini) {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: `You are a helpful and knowledgeable tax assistant in India. Reply to the following query with clear, concise, and accurate information focused only on the user's question. 
+                      Avoid introductions or general explanations unless directly related. 
+                      Use bullet points, tables, and section headings if helpful for clarity. 
+                      Keep the language simple and easy to understand, especially for non-experts.
+                      
+                      User's query: ${input}`
+              }]
+            }]
+          })
+        });
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error('Gemini API endpoint not found. Switching to OpenAI...');
+          }
+          throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          throw new Error('Invalid response format from Gemini API');
+        }
+
+        let displayedContent = '';
+        const words = data.candidates[0].content.parts[0].text.split(' ');
+        
+        for (let i = 0; i < words.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+          displayedContent += words[i] + ' ';
+          setTypingMessage(prev => ({
+            ...prev!,
+            content: formatResponse(displayedContent)
+          }));
+        }
+
+        const text = formatResponse(data.candidates[0].content.parts[0].text);
+        
+        const assistantResponse: Message = {
+          id: typingIndicator.id,
+          role: 'assistant',
+          content: text,
+          timestamp: new Date().toISOString(),
+          name: 'Finacco Solutions'
+        };
+
+        setTypingMessage(null);
+        const updatedMessages = [...messages, newMessage, assistantResponse];
+        setMessages(updatedMessages);
+        await saveToHistory(updatedMessages, input);
+      } else {
+        if (!openai) {
+          throw new Error('OpenAI API key is not configured. Please check your environment variables.');
+        }
+
+        const systemPrompt = `You are a knowledgeable tax assistant specializing in Indian GST and Income Tax. 
+        Format your responses with:
+        - Clear section headers (Overview, Details, Important Points)
+        - Bullet points for key information
+        - Tables for comparative data
+        - Examples where appropriate
+        Always cite relevant sections of tax laws.
+        If you're not completely sure about something, say so and recommend consulting a tax professional.`;
+
+        const completion = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo",
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...messages.map(msg => ({
+              role: msg.role as 'user' | 'assistant',
+              content: msg.content
+            })),
+            { role: "user", content: input }
+          ]
+        });
+
+        if (!completion.choices[0]?.message?.content) {
+          throw new Error('No response received from OpenAI');
+        }
+
+        let displayedContent = '';
+        const words = completion.choices[0].message.content.split(' ');
+        
+        for (let i = 0; i < words.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+          displayedContent += words[i] + ' ';
+          setTypingMessage(prev => ({
+            ...prev!,
+            content: formatResponse(displayedContent)
+          }));
+        }
+
+        const text = formatResponse(completion.choices[0].message.content);
+        
+        const assistantResponse: Message = {
+          id: typingIndicator.id,
+          role: 'assistant',
+          content: text,
+          timestamp: new Date().toISOString(),
+          name: 'Finacco Solutions'
+        };
+
+        setTypingMessage(null);
+        const updatedMessages = [...messages, newMessage, assistantResponse];
+        setMessages(updatedMessages);
+        await saveToHistory(updatedMessages, input);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setTypingMessage(null);
+      let errorMessage = 'An unexpected error occurred. Please try again later.';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('404') || error.message.includes('not found')) {
+          setUseGemini(false);
+          errorMessage = 'Gemini API is not available. Switched to OpenAI. Please try your question again.';
+        
+        } else if (error.message.includes('429') || error.message.includes('quota exceeded')) {
+          errorMessage = 'You have reached the API rate limit. Please try again in a few minutes.';
+        } else if (error.message.includes('OpenAI API key is not configured')) {
+          setUseGemini(true);
+          errorMessage = 'OpenAI is not available. Using Gemini API instead. Please try your question again.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      setError(errorMessage);
+      const errorResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "I apologize, but I'm currently experiencing technical difficulties. Please try again in a few minutes.",
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions'
+      };
+      setMessages(prev => [...prev, errorResponse]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadChatHistory = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('chat_histories')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      if (data) setChatHistories(data);
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+      setError('Failed to load chat history. Please try again later.');
+    }
+  };
+
+  const deleteChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    try {
+      const { error } = await supabase
+        .from('chat_histories')
+        .delete()
+        .eq('id', chatId);
+        
+      if (error) throw error;
+      
+      setChatHistories(prev => prev.filter(chat => chat.id !== chatId));
+      if (chatId === currentChatId) {
+        setCurrentChatId(null);
+        setMessages([]);
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+      setError('Failed to delete chat. Please try again later.');
+    }
+  };
+
+  const clearChat = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error: deleteError } = await supabase
+        .from('chat_histories')
+        .delete()
+        .eq('user_id', user.id);
+        
+      if (deleteError) throw deleteError;
+
+      setMessages([]);
+      setChatHistories([]);
+      setCurrentChatId(null);
+      setError(null);
+    } catch (error) {
+      console.error('Error clearing chat history:', error);
+      setError('Failed to clear chat history. Please try again later.');
+    }
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setMessages([]);
+    setChatHistories([]);
+    setCurrentChatId(null);
+  };
+
+  const handleHistoryMouseEnter = () => {
+    setIsHistoryHovered(true);
+    if (historyTimeoutRef.current) {
+      clearTimeout(historyTimeoutRef.current);
+    }
+  };
+
+  const handleHistoryMouseLeave = () => {
+    if (historyTimeoutRef.current) {
+      clearTimeout(historyTimeoutRef.current);
+    }
+    historyTimeoutRef.current = setTimeout(() => {
+      setIsHistoryHovered(false);
+    }, 300);
+  };
+
+  const handleApiKeySetup = () => {
+    navigate('/api-key-setup', { state: { returnUrl: '/tax-assistant' } });
+  };
+
+  const renderHeader = () => (
+    <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md">
+      <div className="flex items-center justify-between p-4 max-w-full overflow-x-auto">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => setShowHistory(true)}
+            className="md:hidden p-2 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0"
+          >
+            <Menu size={24} />
+          </button>
+          <div className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
+            <Brain className="text-white" size={24} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold truncate">Tax Assistant AI</h1>
+            <p className="text-sm text-white/80 truncate">{user?.email}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 ml-4">
+          <button
+            onClick={handleApiKeySetup}
+            className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <Key size={20} />
+            <span className="hidden sm:inline">API Settings</span>
+          </button>
+          <Link
+            to="/"
+            className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <Home size={20} />
+            <span className="hidden sm:inline">Home</span>
+          </Link>
+          <button
+            onClick={clearChat}
+            className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-300"
+            title="Clear all chats"
+          >
+            <Trash2 size={20} />
+          </button>
+          <button
+            onClick={handleSignOut}
+            className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-300"
+            title="Sign out"
+          >
+            <LogOut size={20} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (isCheckingAuth || isCheckingApiKey) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Auth onAuthSuccess={() => setIsAuthenticated(true)} />;
+  }
+
+  if (!hasApiKey) {
+    return <ApiKeySetup onComplete={() => setHasApiKey(true)} returnUrl="/tax-assistant" />;
+  }
 
   return (
-    // ... (keep existing JSX)
+    <div className="h-screen flex bg-gray-50 overflow-x-hidden">
+      <div 
+        className={`hidden md:flex fixed md:relative inset-y-0 left-0 transform ${
+          showHistory ? 'w-[280px]' : 'w-[50px]'
+        } transition-all duration-300 ease-in-out z-40 bg-gradient-to-br from-gray-800 to-gray-900 h-full flex-col`}
+        onMouseEnter={handleHistoryMouseEnter}
+        onMouseLeave={handleHistoryMouseLeave}
+      >
+        <div className="flex-1 overflow-hidden">
+          <div className={`flex items-center justify-end p-4 ${showHistory ? 'justify-between' : 'justify-center'}`}>
+            {showHistory && (
+              <div className="flex items-center gap-2 text-white">
+                <Brain size={20} />
+                <h2 className="text-lg font-semibold">Chat History</h2>
+              </div>
+            )}
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white"
+            >
+              <Menu size={20} />
+            </button>
+          </div>
+
+          {showHistory && (
+            <>
+              <div className="flex gap-2 px-4 py-2">
+                <button
+                  onClick={() => {
+                    createNewChat();
+                    setShowHistory(false);
+                  }}
+                  className="w-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 text-white py-2 px-4 rounded-lg hover:from-blue-500/30 hover:to-purple-500/30 transition-all duration-300 flex items-center justify-center gap-2"
+                >
+                  <Plus size={18} />
+                  <span>New Chat</span>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
+                {chatHistories.map((chat) => (
+                  <div
+                    key={chat.id}
+                    onClick={() => loadChat(chat)}
+                    className={`group relative hover:bg-white/5 p-4 rounded-lg cursor-pointer transition-all duration-300 mb-2 ${
+                      currentChatId === chat.id ? 'bg-white/10' : ''
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <MessageSquare size={20} className="text-white/70" />
+                      <div className="flex-grow min-w-0 pr-8">
+                        <p className="text-sm font-medium text-white line-clamp-4">{chat.title}</p>
+                        <p className="text-xs text-white/70 mt-1">
+                          {new Date(chat.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => deleteChat(chat.id, e)}
+                        className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-white/10 rounded-full"
+                      >
+                        <Trash2 size={16} className="text-white/70" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {showHistory && (
+        <div className="md:hidden fixed inset-0 bg-gradient-to-br from-gray-800 to-gray-900 z-50 flex flex-col">
+          <div className="safe-top flex items-center justify-between p-4 border-b border-white/10">
+            <div className="flex items-center gap-2 text-white">
+              <Brain size={20} />
+              <h2 className="text-lg font-semibold">Chat History</h2>
+            </div>
+            <button
+              onClick={() => setShowHistory(false)}
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white"
+            >
+              <Menu size={20} />
+            </button>
+          </div>
+
+          <div className="flex gap-2 px-4 py-2">
+            <button
+              onClick={() => {
+                createNewChat();
+                setShowHistory(false);
+              }}
+              className="w-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 text-white py-2 px-4 rounded-lg hover:from-blue-500/30 hover:to-purple-500/30 transition-all duration-300 flex items-center justify-center gap-2"
+            >
+              <Plus size={18} />
+              <span>New Chat</span>
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
+            {chatHistories.map((chat) => (
+              <div
+                key={chat.id}
+                onClick={() => {
+                  loadChat(chat);
+                  setShowHistory(false);
+                }}
+                className={`group relative hover:bg-white/5 p-4 rounded-lg cursor-pointer transition-all duration-300 mb-2 ${
+                  currentChatId === chat.id ? 'bg-white/10' : ''
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <MessageSquare size={20} className="text-white/70" />
+                  <div className="flex-grow min-w-0 pr-8">
+                    <p className="text-sm font-medium text-white line-clamp-4">{chat.title}</p>
+                    <p className="text-xs text-white/70 mt-1">
+                      {new Date(chat.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={(e) => deleteChat(chat.id, e)}
+                    className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-white/10 rounded-full"
+                  >
+                    <Trash2 size={16} className="text-white/70" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-col h-screen max-w-full">
+        {renderHeader()}
+
+        {error && (
+          <div className="p-4 bg-red-50 border-l-4 border-red-500 flex items-center gap-3">
+            <AlertCircle className="text-red-500 flex-shrink-0" size={20} />
+            <p className="text-red-700 text-sm">{error}</p>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+          <div className="max-w-7xl mx-auto space-y-4">
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex items-start gap-3 ${
+                  message.role === 'user' ? 'justify-end' : 'justify-start'
+                }`}
+              >
+                {message.role === 'assistant' && (
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center flex-shrink-0">
+                    <Brain className="text-white" size={18} />
+                  </div>
+                )}
+                <div
+                  className={`rounded-lg p-4 ${
+                    message.role === 'user'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white ml-auto'
+                      : 'bg-white shadow-sm border border-gray-100 mr-auto'
+                  } max-w-[85%] break-words`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-sm truncate">
+                      {message.name || (message.role === 'user' ? 'You' : 'Assistant')}
+                    </span>
+                    <span className="text-xs opacity-70">
+                      {new Date(message.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div
+                    className={message.role === 'assistant' ? 'prose max-w-none' : ''}
+                    dangerouslySetInnerHTML={{ __html: message.content }}
+                  />
+                </div>
+                {message.role === 'user' && (
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <span className="text-white font-medium">
+                      {message.name?.[0]?.toUpperCase() || 'U'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+            
+            {typingMessage && (
+              <div className="flex items-start gap-3 justify-start">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center flex-shrink-0">
+                  <Brain className="text-white" size={18} />
+                </div>
+                <div className="rounded-lg p-4 bg-white shadow-sm border border-gray-100 mr-auto max-w-[85%]">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-sm">{typingMessage.name}</span>
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    </div>
+                  </div>
+                  {typingMessage.content && (
+                    <div
+                      className="prose max-w-none"
+                      dangerouslySetInnerHTML={{ __html: typingMessage.content }}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+            
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200 bg-white safe-bottom">
+          <div className="max-w-7xl mx-auto flex items-start gap-4">
+            <div className="flex-1 relative">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  adjustTextareaHeight();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (input.trim() && !isLoading) {
+                      handleSubmit(e);
+                    }
+                  }
+                }}
+                placeholder="Ask me about taxes... (Press Enter to send, Shift + Enter for new line)"
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-all duration-300"
+                style={{ minHeight: '56px', maxHeight: '200px' }}
+                disabled={isLoading}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className={`px-4 sm:px-6 py-3 rounded-lg flex items-center gap-2 transition-all duration-300 transform hover:scale-105 flex-shrink-0 ${
+                isLoading || !input.trim()
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg'
+              }`}
+            >
+              {isLoading ? (
+                <Loader2 className="animate-spin" size={20} />
+              ) : (
+                <Send size={20} />
+              )}
+              <span className="hidden sm:inline">Send</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 };
-
-// Add the download function to the window object type
-declare global {
-  interface Window {
-    downloadDocument: (type: string, content: string) => void;
-  }
-}
 
 export default TaxAssistant;
