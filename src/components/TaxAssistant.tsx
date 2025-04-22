@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import ReactMarkdown from 'react-markdown';
 import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Key } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import Auth from './Auth';
 import ApiKeySetup from './ApiKeySetup';
+import { supabase } from '../lib/supabase';
 
 interface Message {
   id: string;
@@ -23,20 +23,8 @@ interface ChatHistory {
   user_id: string;
 }
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-
-let supabase = null;
-try {
-  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-    new URL(SUPABASE_URL);
-    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  }
-} catch (error) {
-  console.error('Failed to initialize Supabase client:', error);
-}
 
 let openai = null;
 try {
@@ -358,10 +346,6 @@ const TaxAssistant: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      setError('Supabase configuration is missing. Please check your environment variables.');
-      return;
-    }
     if (!OPENAI_API_KEY && !GEMINI_API_KEY) {
       setError('API keys are missing. Please check your environment variables.');
       return;
@@ -439,10 +423,6 @@ const TaxAssistant: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
-    if (!supabase) {
-      setError('Cannot save chat history: Supabase is not properly configured.');
-      return;
-    }
 
     if (!checkRateLimit()) return;
 
@@ -651,8 +631,6 @@ const TaxAssistant: React.FC = () => {
   };
 
   const loadChatHistory = async (userId: string) => {
-    if (!supabase) return;
-    
     try {
       const { data, error } = await supabase
         .from('chat_histories')
@@ -670,7 +648,6 @@ const TaxAssistant: React.FC = () => {
 
   const deleteChat = async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!supabase) return;
     
     try {
       const { error } = await supabase
@@ -692,8 +669,6 @@ const TaxAssistant: React.FC = () => {
   };
 
   const clearChat = async () => {
-    if (!supabase) return;
-    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -716,7 +691,6 @@ const TaxAssistant: React.FC = () => {
   };
 
   const handleSignOut = async () => {
-    if (!supabase) return;
     await supabase.auth.signOut();
     setMessages([]);
     setChatHistories([]);
@@ -1077,3 +1051,5 @@ const TaxAssistant: React.FC = () => {
 };
 
 export default TaxAssistant;
+
+export default TaxAssistant

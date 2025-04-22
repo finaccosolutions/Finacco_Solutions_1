@@ -1,6 +1,5 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
-import { createClient } from '@supabase/supabase-js';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import Services from './components/Services';
@@ -11,18 +10,7 @@ import WhatsAppButton from './components/WhatsAppButton';
 import TaxAssistant from './components/TaxAssistant';
 import Auth from './components/Auth';
 import ApiKeySetup from './components/ApiKeySetup';
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: false
-    }
-  }
-);
+import { supabase } from './lib/supabase';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;

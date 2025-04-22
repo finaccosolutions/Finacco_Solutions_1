@@ -1,19 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { AlertCircle, Key, Loader2, Info, Trash2, RefreshCw, Home, MessageSquare } from 'lucide-react';
+import { Key, Loader2, Info, Trash2, RefreshCw, Home, MessageSquare } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
-    }
-  }
-);
+import { supabase } from '../lib/supabase';
 
 interface ApiKeySetupProps {
   onComplete: () => void;

@@ -1,20 +1,8 @@
 import React, { useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { Mail, Lock, UserPlus, LogIn, Home, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ApiKeySetup from './ApiKeySetup';
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: false
-    }
-  }
-);
+import { supabase } from '../lib/supabase';
 
 interface AuthProps {
   onAuthSuccess: () => void;

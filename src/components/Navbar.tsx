@@ -1,21 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Menu, X, Brain, LogIn, UserPlus, LogOut, User, ChevronDown } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { createClient } from '@supabase/supabase-js';
 import Logo from './Logo';
 import Auth from './Auth';
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: false
-    }
-  }
-);
+import { supabase } from '../lib/supabase';
 
 const Navbar: React.FC = () => {
   const navigate = useNavigate();
