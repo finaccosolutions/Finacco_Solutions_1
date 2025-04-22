@@ -466,7 +466,19 @@ const TaxAssistant: React.FC = () => {
             "required": true
           }
         ]
-      }`;
+      }
+      
+      For example, if it's a rent agreement, include fields like:
+      - Landlord's Name
+      - Landlord's Address
+      - Tenant's Name
+      - Tenant's Address
+      - Monthly Rent Amount
+      - Security Deposit
+      - Lease Start Date
+      - Lease Duration
+      
+      Make sure to include all necessary fields for a legally valid document.`;
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
@@ -513,7 +525,7 @@ const TaxAssistant: React.FC = () => {
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: `Please provide the ${fieldsData.fields[0].label}:`,
+        content: `Let's create a ${documentType}. Please provide the ${fieldsData.fields[0].label}:`,
         timestamp: new Date().toISOString(),
         name: 'Finacco Solutions'
       };
@@ -548,12 +560,17 @@ const TaxAssistant: React.FC = () => {
     } else {
       // Generate document
       try {
-        const documentPrompt = `Generate a formal ${documentType} using this information:
+        const documentPrompt = `Create a formal ${documentType} using this information:
         ${Object.entries(collectedData)
-          .map(([key, value]) => `${key}: ${value}`)
+          .map(([key, value]) => {
+            const field = documentFields.find(f => f.id === key);
+            return `${field?.label}: ${value}`;
+          })
           .join('\n')}
         
-        Format it professionally with proper sections and legal language.`;
+        Format it professionally with proper sections, legal language, and all necessary clauses.
+        Include spaces for signatures at the bottom.
+        Make it look like a real legal document.`;
 
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
@@ -571,23 +588,29 @@ const TaxAssistant: React.FC = () => {
         const data = await response.json();
         const documentContent = data.candidates[0].content.parts[0].text;
         
+        const formattedContent = `
+          <div class="space-y-4">
+            <div class="prose max-w-none">
+              ${documentContent}
+            </div>
+            <button
+              onclick="downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`)"
+              class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <span>Download PDF</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </button>
+          </div>
+        `;
+
         const assistantMessage: Message = {
           id: Date.now().toString(),
           role: 'assistant',
-          content: `
-            <div class="space-y-4">
-              <div class="prose max-w-none">
-                ${documentContent}
-              </div>
-              <button
-                onclick="downloadDocument('${documentContent.replace(/'/g, "\\'")}')"
-                class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <span>Download PDF</span>
-                <Download size={16} />
-              </button>
-            </div>
-          `,
+          content: formattedContent,
           timestamp: new Date().toISOString(),
           name: 'Finacco Solutions',
           isDocument: true
@@ -807,6 +830,7 @@ const TaxAssistant: React.FC = () => {
         if (error.message.includes('404') || error.message.includes('not found')) {
           setUseGemini(false);
           errorMessage = 'Gemini API is not available. Switched to OpenAI. Please try your question again.';
+        
         } else if (error.message.includes('429') || error.message.includes('quota exceeded')) {
           errorMessage = 'You have reached the API rate limit. Please try again in a few minutes.';
         } else if (error.message.includes('OpenAI API key is not configured')) {
@@ -828,7 +852,6 @@ const TaxAssistant: React.FC = () => {
       setMessages(prev => [...prev, errorResponse]);
     } finally {
       setIsLoading(false);
-    
     }
   };
 
