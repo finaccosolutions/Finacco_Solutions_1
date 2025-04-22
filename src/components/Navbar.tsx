@@ -1,8 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Menu, X, Brain, LogIn, UserPlus, LogOut, User, ChevronDown } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { createClient } from '@supabase/supabase-js';
 import Logo from './Logo';
-import { supabase } from '../lib/supabase';
+import Auth from './Auth';
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false
+    }
+  }
+);
 
 const Navbar: React.FC = () => {
   const navigate = useNavigate();
@@ -11,6 +24,8 @@ const Navbar: React.FC = () => {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isLogin, setIsLogin] = useState(true);
   const accountMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -72,9 +87,9 @@ const Navbar: React.FC = () => {
     }
   };
 
-  const handleTaxAssistantClick = () => {
-    navigate('/tax-assistant');
-    setIsOpen(false);
+  const handleAuthSuccess = () => {
+    setShowAuthModal(false);
+    setShowAccountMenu(false);
   };
 
   const AccountMenu = () => (
@@ -111,6 +126,7 @@ const Navbar: React.FC = () => {
             <>
               <button
                 onClick={() => {
+                  setIsLogin(true);
                   navigate('/tax-assistant');
                   setShowAccountMenu(false);
                 }}
@@ -121,6 +137,7 @@ const Navbar: React.FC = () => {
               </button>
               <button
                 onClick={() => {
+                  setIsLogin(false);
                   navigate('/tax-assistant');
                   setShowAccountMenu(false);
                 }}
@@ -162,13 +179,13 @@ const Navbar: React.FC = () => {
               </button>
             ))}
             
-            <button 
-              onClick={handleTaxAssistantClick}
+            <Link 
+              to="/tax-assistant"
               className="flex items-center space-x-2 text-gray-100 hover:text-white font-medium transition-all duration-300 relative group px-4 py-2 rounded-lg hover:bg-white/10"
             >
               <Brain size={20} />
               <span>Tax AI Assistant</span>
-            </button>
+            </Link>
 
             <AccountMenu />
           </nav>
@@ -210,13 +227,14 @@ const Navbar: React.FC = () => {
             </button>
           ))}
           
-          <button 
-            onClick={handleTaxAssistantClick}
+          <Link 
+            to="/tax-assistant"
             className="flex items-center space-x-2 text-xl text-gray-100 hover:text-white font-medium transition-all duration-300 transform hover:translate-x-2 hover:bg-white/10 px-4 py-2 rounded-lg"
+            onClick={() => setIsOpen(false)}
           >
             <Brain size={24} />
             <span>Tax AI Assistant</span>
-          </button>
+          </Link>
 
           {user ? (
             <>
