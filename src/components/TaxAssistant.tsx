@@ -28,9 +28,10 @@ interface ChatHistory {
 interface DocumentField {
   id: string;
   label: string;
-  type: string;
+  type: 'text' | 'email' | 'tel' | 'date' | 'number';
   required: boolean;
-  value?: string;
+  placeholder?: string;
+  description?: string;
 }
 
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
@@ -275,14 +276,12 @@ const TaxAssistant: React.FC = () => {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [isDocumentMode, setIsDocumentMode] = useState(false);
   const [documentType, setDocumentType] = useState('');
-  const [documentFields, setDocumentFields] = useState<DocumentField[]>([]);
-  const [currentFieldIndex, setCurrentFieldIndex] = useState(-1);
-  const [collectedData, setCollectedData] = useState<Record<string, string>>({});
   const [showForm, setShowForm] = useState(false);
   const [formFields, setFormFields] = useState<DocumentField[]>([]);
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [formStep, setFormStep] = useState(0);
   const [isGeneratingDocument, setIsGeneratingDocument] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestTimestamps = useRef<number[]>([]);
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -398,6 +397,234 @@ const TaxAssistant: React.FC = () => {
     } finally {
       setIsLoading(false);
       setTypingMessage(null);
+    }
+  };
+
+  const handleDocumentRequest = async (query: string) => {
+    setIsDocumentMode(true);
+    const docType = query.replace(/^(draft|create|generate|write)\s+an?\s+/i, '').trim();
+    setDocumentType(docType);
+    
+    try {
+      const fieldsPrompt = `For a ${docType}, provide a JSON array of required fields with this structure:
+      {
+        "fields": [
+          {
+            "id": "field_1",
+            "label": "Field Label",
+            "type": "text",
+            "required": true,
+            "placeholder": "Enter field value",
+            "description": "Help text for this field"
+          }
+        ]
+      }
+      Include all necessary fields for a ${docType}. Types should be one of: text, email, tel, date, number.`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: fieldsPrompt }] }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 1000,
+            }
+          })
+        }
+      );
+
+      if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+
+      const data = await response.json();
+      if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        throw new Error('Invalid response format from API');
+      }
+
+      const responseText = data.candidates[0].content.parts[0].text;
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      
+      if (!jsonMatch) throw new Error('Invalid response format: No JSON object found');
+
+      let fieldsData;
+      try {
+        const jsonString = jsonMatch[0]
+          .replace(/[\u0000-\u001F]+/g, '')
+          .replace(/,\s*}/g, '}')
+          .replace(/,\s*]/g, ']');
+        
+        fieldsData = JSON.parse(jsonString);
+        
+        if (!fieldsData.fields || !Array.isArray(fieldsData.fields)) {
+          throw new Error('Invalid fields data structure');
+        }
+      } catch (error) {
+        console.error('Failed to parse fields data:', error);
+        throw new Error('Failed to parse document fields');
+      }
+
+      setFormFields(fieldsData.fields);
+      setFormStep(0);
+      setShowForm(true);
+      
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `Let's create a ${docType}. Please fill in the required information:`,
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions'
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+    } catch (error) {
+      console.error('Error setting up document form:', error);
+      setError('Failed to set up document form. Please try again.');
+      setIsDocumentMode(false);
+      setFormFields([]);
+      setShowForm(false);
+    }
+  };
+
+  const validateForm = (data: Record<string, string>, fields: DocumentField[]): boolean => {
+    const errors: Record<string, string> = {};
+    
+    fields.forEach(field => {
+      const value = data[field.id]?.trim() || '';
+      
+      if (field.required && !value) {
+        errors[field.id] = `${field.label} is required`;
+      } else if (value) {
+        switch (field.type) {
+          case 'email':
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+              errors[field.id] = 'Please enter a valid email address';
+            }
+            break;
+          case 'tel':
+            if (!/^\+?[\d\s-()]+$/.test(value)) {
+              errors[field.id] = 'Please enter a valid phone number';
+            }
+            break;
+          case 'date':
+            if (isNaN(Date.parse(value))) {
+              errors[field.id] = 'Please enter a valid date';
+            }
+            break;
+          case 'number':
+            if (isNaN(Number(value))) {
+              errors[field.id] = 'Please enter a valid number';
+            }
+            break;
+        }
+      }
+    });
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm(formData, formFields)) {
+      setError('Please correct the errors in the form');
+      return;
+    }
+
+    setIsGeneratingDocument(true);
+    setError(null);
+
+    try {
+      const documentPrompt = `Create a formal ${documentType} using this information:
+      ${Object.entries(formData)
+        .map(([key, value]) => {
+          const field = formFields.find(f => f.id === key);
+          return `${field?.label}: ${value}`;
+        })
+        .join('\n')}
+      
+      Format it professionally with:
+      1. Proper sections and headings
+      2. Legal language and necessary clauses
+      3. Signature blocks at the bottom
+      4. Current date and location fields
+      5. Make it look like a real legal document`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: documentPrompt }] }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 2048,
+            }
+          })
+        }
+      );
+
+      if (!response.ok) throw new Error('Failed to generate document');
+      
+      const data = await response.json();
+      const documentContent = data.candidates[0].content.parts[0].text;
+      
+      const formattedContent = `
+        <div class="space-y-6">
+          <div class="prose max-w-none">
+            ${documentContent}
+          </div>
+          <div class="flex justify-end">
+            <button
+              onclick="downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`)"
+              class="inline-flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <span>Download PDF</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `;
+
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: formattedContent,
+        timestamp: new Date().toISOString(),
+        name: 'Finacco Solutions',
+        isDocument: true
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+      setIsDocumentMode(false);
+      setShowForm(false);
+      setFormFields([]);
+      setFormData({});
+      setFormStep(0);
+      setFormErrors({});
+    } catch (error) {
+      console.error('Error generating document:', error);
+      setError('Failed to generate document. Please try again.');
+    } finally {
+      setIsGeneratingDocument(false);
+    }
+  };
+
+  const handleFieldChange = (fieldId: string, value: string) => {
+    setFormData(prev => ({ ...prev, [fieldId]: value }));
+    if (formErrors[fieldId]) {
+      setFormErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[fieldId];
+        return newErrors;
+      });
     }
   };
 
@@ -568,181 +795,6 @@ const TaxAssistant: React.FC = () => {
     }
   };
 
-  const handleDocumentRequest = async (query: string) => {
-    setIsDocumentMode(true);
-    setDocumentType(query.replace(/^(draft|create|generate|write)\s+an?\s+/i, '').trim());
-    
-    try {
-      const fieldsPrompt = `For a ${documentType}, provide a JSON object containing all required fields with this structure:
-      {
-        "fields": [
-          {
-            "id": "field_1",
-            "label": "Field Name",
-            "type": "text",
-            "required": true
-          }
-        ]
-      }`;
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: fieldsPrompt }] }],
-            generationConfig: {
-              temperature: 0.1,
-              topK: 1,
-              topP: 1,
-              maxOutputTokens: 1000,
-            }
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        throw new Error('Invalid response format from API');
-      }
-
-      const responseText = data.candidates[0].content.parts[0].text;
-      let jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      
-      if (!jsonMatch) {
-        console.error('No JSON object found in response:', responseText);
-        throw new Error('Invalid response format: No JSON object found');
-      }
-
-      let fieldsData;
-      try {
-        const jsonString = jsonMatch[0]
-          .replace(/[\u0000-\u001F]+/g, '')
-          .replace(/,\s*}/g, '}')
-          .replace(/,\s*]/g, ']');
-        
-        fieldsData = JSON.parse(jsonString);
-        
-        if (!fieldsData.fields || !Array.isArray(fieldsData.fields)) {
-          throw new Error('Invalid fields data structure');
-        }
-
-        fieldsData.fields.forEach((field: any, index: number) => {
-          if (!field.id || !field.label || !field.type) {
-            throw new Error(`Invalid field structure at index ${index}`);
-          }
-        });
-      } catch (parseError) {
-        console.error('Failed to parse JSON:', jsonMatch[0], parseError);
-        throw new Error('Failed to parse document fields data');
-      }
-
-      setFormFields(fieldsData.fields);
-      setFormStep(0);
-      setShowForm(true);
-      
-      const assistantMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: `Let's create a ${documentType}. Please fill in the required information:`,
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions'
-      };
-      
-      setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
-      console.error('Error getting document fields:', error);
-      setError('Failed to initialize document form. Please try again.');
-      setIsDocumentMode(false);
-      setFormFields([]);
-      setShowForm(false);
-    }
-  };
-
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsGeneratingDocument(true);
-
-    try {
-      const documentPrompt = `Create a formal ${documentType} using this information:
-      ${Object.entries(formData)
-        .map(([key, value]) => {
-          const field = formFields.find(f => f.id === key);
-          return `${field?.label}: ${value}`;
-        })
-        .join('\n')}
-      
-      Format it professionally with proper sections, legal language, and all necessary clauses.
-      Include spaces for signatures at the bottom.
-      Make it look like a real legal document.`;
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: documentPrompt }] }]
-          })
-        }
-      );
-
-      if (!response.ok) throw new Error('Failed to generate document');
-      
-      const data = await response.json();
-      const documentContent = data.candidates[0].content.parts[0].text;
-      
-      const formattedContent = `
-        <div class="space-y-4">
-          <div class="prose max-w-none">
-            ${documentContent}
-          </div>
-          <button
-            onclick="downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`)"
-            class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <span>Download PDF</span>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-          </button>
-        </div>
-      `;
-
-      const assistantMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: formattedContent,
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions',
-        isDocument: true
-      };
-      
-      setMessages(prev => [...prev, assistantMessage]);
-      setIsDocumentMode(false);
-      setShowForm(false);
-      setFormFields([]);
-      setFormData({});
-      setFormStep(0);
-    } catch (error) {
-      console.error('Error generating document:', error);
-      setError('Failed to generate document. Please try again.');
-    } finally {
-      setIsGeneratingDocument(false);
-    }
-  };
-
-  const handleFieldChange = (fieldId: string, value: string) => {
-    setFormData(prev => ({ ...prev, [fieldId]: value }));
-  };
-
   const loadChatHistory = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -790,6 +842,7 @@ const TaxAssistant: React.FC = () => {
         .from('chat_histories')
         .delete()
         .eq('user_id', user.id);
+        
         
       if (deleteError) throw deleteError;
 
@@ -1115,65 +1168,83 @@ const TaxAssistant: React.FC = () => {
             
             {showForm && (
               <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
-                <h3 className="text-xl font-semibold mb-4">
-                  {documentType} Information
-                </h3>
+                <div className="mb-6">
+                  <h3 className="text-xl font-semibold text-gray-900">
+                    {documentType} Information
+                  </h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Fill in the details below to generate your document. Required fields are marked with an asterisk (*).
+                  </p>
+                </div>
+
                 <form onSubmit={handleFormSubmit} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 gap-6">
                     {formFields.map((field, index) => (
-                      <div key={field.id} className={formStep === Math.floor(index / 2) ? 'block' : 'hidden'}>
-                        <label htmlFor={field.id} className="block text-sm font-medium text-gray-700 mb-2">
+                      <div key={field.id} className={formStep === Math.floor(index / 3) ? 'block' : 'hidden'}>
+                        <label htmlFor={field.id} className="block text-sm font-medium text-gray-700">
                           {field.label} {field.required && <span className="text-red-500">*</span>}
                         </label>
-                        <input
-                          type={field.type}
-                          id={field.id}
-                          value={formData[field.id] || ''}
-                          onChange={(e) => handleFieldChange(field.id, e.target.value)}
-                          required={field.required}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
+                        
+                        {field.description && (
+                          <p className="mt-1 text-sm text-gray-500">{field.description}</p>
+                        )}
+                        
+                        <div className="mt-1">
+                          <input
+                            type={field.type}
+                            id={field.id}
+                            name={field.id}
+                            value={formData[field.id] || ''}
+                            onChange={(e) => handleFieldChange(field.id, e.target.value)}
+                            placeholder={field.placeholder}
+                            className={`block w-full rounded-md shadow-sm ${
+                              formErrors[field.id]
+                                ? 'border-red-300 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500'
+                                : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'
+                            }`}
+                            required={field.required}
+                          />
+                          
+                          {formErrors[field.id] && (
+                            <p className="mt-2 text-sm text-red-600">{formErrors[field.id]}</p>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
                   
-                  <div className="flex justify-between mt-6">
+                  <div className="flex justify-between mt-8">
                     {formStep > 0 && (
                       <button
                         type="button"
                         onClick={() => setFormStep(prev => prev - 1)}
-                        className="px-4 py-2 text-gray-600 hover:text-gray-900 flex items-center gap-2"
+                        className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                       >
-                        <ChevronRight className="w-5 h-5 rotate-180" />
                         Previous
                       </button>
                     )}
                     
-                    {formStep < Math.ceil(formFields.length / 2) - 1 ? (
+                    {formStep < Math.ceil(formFields.length / 3) - 1 ? (
                       <button
                         type="button"
                         onClick={() => setFormStep(prev => prev + 1)}
-                        className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                        className="ml-auto inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                       >
                         Next
-                        <ChevronRight className="w-5 h-5" />
                       </button>
                     ) : (
                       <button
                         type="submit"
                         disabled={isGeneratingDocument}
-                        className="ml-auto px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="ml-auto inline-flex items-center px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isGeneratingDocument ? (
                           <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
+                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
                             Generating...
                           </>
                         ) : (
-                          <>
-                            Generate Document
-                            <ChevronRight className="w-5 h-5" />
-                          </>
+                          'Generate Document'
                         )}
                       </button>
                     )}
