@@ -313,6 +313,7 @@ const TaxAssistant: React.FC = () => {
       // Check for document generation requests
       if (/^(draft|create|generate|write)\s+an?\s+/i.test(input)) {
         await handleDocumentRequest(input);
+        setIsLoading(false);
         return;
       }
 
@@ -842,7 +843,6 @@ const TaxAssistant: React.FC = () => {
         .from('chat_histories')
         .delete()
         .eq('user_id', user.id);
-        
         
       if (deleteError) throw deleteError;
 
