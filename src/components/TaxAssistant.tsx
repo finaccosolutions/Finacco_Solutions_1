@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Key, Download } from 'lucide-react';
+import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Key, Download, ChevronRight } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import html2pdf from 'html2pdf.js';
 import Auth from './Auth';
@@ -278,6 +278,11 @@ const TaxAssistant: React.FC = () => {
   const [documentFields, setDocumentFields] = useState<DocumentField[]>([]);
   const [currentFieldIndex, setCurrentFieldIndex] = useState(-1);
   const [collectedData, setCollectedData] = useState<Record<string, string>>({});
+  const [showForm, setShowForm] = useState(false);
+  const [formFields, setFormFields] = useState<DocumentField[]>([]);
+  const [formData, setFormData] = useState<Record<string, string>>({});
+  const [formStep, setFormStep] = useState(0);
+  const [isGeneratingDocument, setIsGeneratingDocument] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestTimestamps = useRef<number[]>([]);
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -456,7 +461,7 @@ const TaxAssistant: React.FC = () => {
     setDocumentType(query.replace(/^(draft|create|generate|write)\s+an?\s+/i, '').trim());
     
     try {
-      const fieldsPrompt = `For a ${documentType}, list the required fields as a JSON object with this exact structure:
+      const fieldsPrompt = `For a ${documentType}, provide a JSON object containing all required fields with this structure:
       {
         "fields": [
           {
@@ -466,19 +471,7 @@ const TaxAssistant: React.FC = () => {
             "required": true
           }
         ]
-      }
-      
-      For example, if it's a rent agreement, include fields like:
-      - Landlord's Name
-      - Landlord's Address
-      - Tenant's Name
-      - Tenant's Address
-      - Monthly Rent Amount
-      - Security Deposit
-      - Lease Start Date
-      - Lease Duration
-      
-      Make sure to include all necessary fields for a legally valid document.`;
+      }`;
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
@@ -507,25 +500,44 @@ const TaxAssistant: React.FC = () => {
       }
 
       const responseText = data.candidates[0].content.parts[0].text;
+      let jsonMatch = responseText.match(/\{[\s\S]*\}/);
       
-      // Find the JSON object in the response text
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        throw new Error('No JSON object found in response');
+        console.error('No JSON object found in response:', responseText);
+        throw new Error('Invalid response format: No JSON object found');
       }
 
-      const fieldsData = JSON.parse(jsonMatch[0]);
-      if (!fieldsData.fields || !Array.isArray(fieldsData.fields)) {
-        throw new Error('Invalid fields data structure');
+      let fieldsData;
+      try {
+        const jsonString = jsonMatch[0]
+          .replace(/[\u0000-\u001F]+/g, '')
+          .replace(/,\s*}/g, '}')
+          .replace(/,\s*]/g, ']');
+        
+        fieldsData = JSON.parse(jsonString);
+        
+        if (!fieldsData.fields || !Array.isArray(fieldsData.fields)) {
+          throw new Error('Invalid fields data structure');
+        }
+
+        fieldsData.fields.forEach((field: any, index: number) => {
+          if (!field.id || !field.label || !field.type) {
+            throw new Error(`Invalid field structure at index ${index}`);
+          }
+        });
+      } catch (parseError) {
+        console.error('Failed to parse JSON:', jsonMatch[0], parseError);
+        throw new Error('Failed to parse document fields data');
       }
 
-      setDocumentFields(fieldsData.fields);
-      setCurrentFieldIndex(0);
+      setFormFields(fieldsData.fields);
+      setFormStep(0);
+      setShowForm(true);
       
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: `Let's create a ${documentType}. Please provide the ${fieldsData.fields[0].label}:`,
+        content: `Let's create a ${documentType}. Please fill in the required information:`,
         timestamp: new Date().toISOString(),
         name: 'Finacco Solutions'
       };
@@ -533,326 +545,90 @@ const TaxAssistant: React.FC = () => {
       setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
       console.error('Error getting document fields:', error);
-      setError('Failed to initialize document drafting. Please try again.');
+      setError('Failed to initialize document form. Please try again.');
       setIsDocumentMode(false);
-      setDocumentFields([]);
-      setCurrentFieldIndex(-1);
+      setFormFields([]);
+      setShowForm(false);
     }
   };
 
-  const handleFieldInput = async (input: string) => {
-    const currentField = documentFields[currentFieldIndex];
-    setCollectedData(prev => ({ ...prev, [currentField.id]: input }));
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsGeneratingDocument(true);
 
-    if (currentFieldIndex < documentFields.length - 1) {
-      setCurrentFieldIndex(currentFieldIndex + 1);
-      const nextField = documentFields[currentFieldIndex + 1];
+    try {
+      const documentPrompt = `Create a formal ${documentType} using this information:
+      ${Object.entries(formData)
+        .map(([key, value]) => {
+          const field = formFields.find(f => f.id === key);
+          return `${field?.label}: ${value}`;
+        })
+        .join('\n')}
       
+      Format it professionally with proper sections, legal language, and all necessary clauses.
+      Include spaces for signatures at the bottom.
+      Make it look like a real legal document.`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: documentPrompt }] }]
+          })
+        }
+      );
+
+      if (!response.ok) throw new Error('Failed to generate document');
+      
+      const data = await response.json();
+      const documentContent = data.candidates[0].content.parts[0].text;
+      
+      const formattedContent = `
+        <div class="space-y-4">
+          <div class="prose max-w-none">
+            ${documentContent}
+          </div>
+          <button
+            onclick="downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`)"
+            class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <span>Download PDF</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+        </div>
+      `;
+
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: `Please provide the ${nextField.label}:`,
+        content: formattedContent,
         timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions'
+        name: 'Finacco Solutions',
+        isDocument: true
       };
       
       setMessages(prev => [...prev, assistantMessage]);
-    } else {
-      // Generate document
-      try {
-        const documentPrompt = `Create a formal ${documentType} using this information:
-        ${Object.entries(collectedData)
-          .map(([key, value]) => {
-            const field = documentFields.find(f => f.id === key);
-            return `${field?.label}: ${value}`;
-          })
-          .join('\n')}
-        
-        Format it professionally with proper sections, legal language, and all necessary clauses.
-        Include spaces for signatures at the bottom.
-        Make it look like a real legal document.`;
-
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: documentPrompt }] }]
-            })
-          }
-        );
-
-        if (!response.ok) throw new Error('Failed to generate document');
-        
-        const data = await response.json();
-        const documentContent = data.candidates[0].content.parts[0].text;
-        
-        const formattedContent = `
-          <div class="space-y-4">
-            <div class="prose max-w-none">
-              ${documentContent}
-            </div>
-            <button
-              onclick="downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`)"
-              class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <span>Download PDF</span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-            </button>
-          </div>
-        `;
-
-        const assistantMessage: Message = {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: formattedContent,
-          timestamp: new Date().toISOString(),
-          name: 'Finacco Solutions',
-          isDocument: true
-        };
-        
-        setMessages(prev => [...prev, assistantMessage]);
-        setIsDocumentMode(false);
-        setDocumentFields([]);
-        setCurrentFieldIndex(-1);
-        setCollectedData({});
-      } catch (error) {
-        console.error('Error generating document:', error);
-        setError('Failed to generate document. Please try again.');
-        setIsDocumentMode(false);
-      }
+      setIsDocumentMode(false);
+      setShowForm(false);
+      setFormFields([]);
+      setFormData({});
+      setFormStep(0);
+    } catch (error) {
+      console.error('Error generating document:', error);
+      setError('Failed to generate document. Please try again.');
+    } finally {
+      setIsGeneratingDocument(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    if (!checkRateLimit()) return;
-
-    setError(null);
-    const userName = user?.email?.split('@')[0] || 'User';
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input,
-      timestamp: new Date().toISOString(),
-      name: userName
-    };
-
-    setMessages(prev => [...prev, newMessage]);
-    setInput('');
-    setIsLoading(true);
-
-    // Check if this is a document drafting request
-    const isDraftRequest = /^(draft|create|generate|write)\s+an?\s+/i.test(input.trim());
-    
-    if (isDraftRequest) {
-      await handleDocumentRequest(input);
-      setIsLoading(false);
-      return;
-    }
-
-    if (isDocumentMode) {
-      await handleFieldInput(input);
-      setIsLoading(false);
-      return;
-    }
-
-    const typingIndicator: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      content: '',
-      timestamp: new Date().toISOString(),
-      name: 'Finacco Solutions',
-      isTyping: true
-    };
-    setTypingMessage(typingIndicator);
-
-    try {
-      const finaccoResponse = getFinaccoResponse(input);
-      
-      if (finaccoResponse) {
-        let displayedContent = '';
-        const words = finaccoResponse.split(' ');
-        
-        for (let i = 0; i < words.length; i++) {
-          await new Promise(resolve => setTimeout(resolve, 50));
-          displayedContent += words[i] + ' ';
-          setTypingMessage(prev => ({
-            ...prev!,
-            content: formatResponse(displayedContent)
-          }));
-        }
-
-        const assistantResponse: Message = {
-          id: typingIndicator.id,
-          role: 'assistant',
-          content: formatResponse(finaccoResponse),
-          timestamp: new Date().toISOString(),
-          name: 'Finacco Solutions'
-        };
-        
-        setTypingMessage(null);
-        const updatedMessages = [...messages, newMessage, assistantResponse];
-        setMessages(updatedMessages);
-        
-        await saveToHistory(updatedMessages, input);
-        return;
-      }
-
-      if (useGemini) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: `You are a helpful and knowledgeable tax assistant in India. Reply to the following query with clear, concise, and accurate information focused only on the user's question. 
-                      Avoid introductions or general explanations unless directly related. 
-                      Use bullet points, tables, and section headings if helpful for clarity. 
-                      Keep the language simple and easy to understand, especially for non-experts.
-                      
-                      User's query: ${input}`
-              }]
-            }]
-          })
-        });
-
-        if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error('Gemini API endpoint not found. Switching to OpenAI...');
-          }
-          throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          throw new Error('Invalid response format from Gemini API');
-        }
-
-        let displayedContent = '';
-        const words = data.candidates[0].content.parts[0].text.split(' ');
-        
-        for (let i = 0; i < words.length; i++) {
-          await new Promise(resolve => setTimeout(resolve, 50));
-          displayedContent += words[i] + ' ';
-          setTypingMessage(prev => ({
-            ...prev!,
-            content: formatResponse(displayedContent)
-          }));
-        }
-
-        const text = formatResponse(data.candidates[0].content.parts[0].text);
-        
-        const assistantResponse: Message = {
-          id: typingIndicator.id,
-          role: 'assistant',
-          content: text,
-          timestamp: new Date().toISOString(),
-          name: 'Finacco Solutions'
-        };
-
-        setTypingMessage(null);
-        const updatedMessages = [...messages, newMessage, assistantResponse];
-        setMessages(updatedMessages);
-        await saveToHistory(updatedMessages, input);
-      } else {
-        if (!openai) {
-          throw new Error('OpenAI API key is not configured. Please check your environment variables.');
-        }
-
-        const systemPrompt = `You are a knowledgeable tax assistant specializing in Indian GST and Income Tax. 
-        Format your responses with:
-        - Clear section headers (Overview, Details, Important Points)
-        - Bullet points for key information
-        - Tables for comparative data
-        - Examples where appropriate
-        Always cite relevant sections of tax laws.
-        If you're not completely sure about something, say so and recommend consulting a tax professional.`;
-
-        const completion = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages.map(msg => ({
-              role: msg.role as 'user' | 'assistant',
-              content: msg.content
-            })),
-            { role: "user", content: input }
-          ]
-        });
-
-        if (!completion.choices[0]?.message?.content) {
-          throw new Error('No response received from OpenAI');
-        }
-
-        let displayedContent = '';
-        const words = completion.choices[0].message.content.split(' ');
-        
-        for (let i = 0; i < words.length; i++) {
-          await new Promise(resolve => setTimeout(resolve, 50));
-          displayedContent += words[i] + ' ';
-          setTypingMessage(prev => ({
-            ...prev!,
-            content: formatResponse(displayedContent)
-          }));
-        }
-
-        const text = formatResponse(completion.choices[0].message.content);
-        
-        const assistantResponse: Message = {
-          id: typingIndicator.id,
-          role: 'assistant',
-          content: text,
-          timestamp: new Date().toISOString(),
-          name: 'Finacco Solutions'
-        };
-
-        setTypingMessage(null);
-        const updatedMessages = [...messages, newMessage, assistantResponse];
-        setMessages(updatedMessages);
-        await saveToHistory(updatedMessages, input);
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      setTypingMessage(null);
-      let errorMessage = 'An unexpected error occurred. Please try again later.';
-      
-      if (error instanceof Error) {
-        if (error.message.includes('404') || error.message.includes('not found')) {
-          setUseGemini(false);
-          errorMessage = 'Gemini API is not available. Switched to OpenAI. Please try your question again.';
-        
-        } else if (error.message.includes('429') || error.message.includes('quota exceeded')) {
-          errorMessage = 'You have reached the API rate limit. Please try again in a few minutes.';
-        } else if (error.message.includes('OpenAI API key is not configured')) {
-          setUseGemini(true);
-          errorMessage = 'OpenAI is not available. Using Gemini API instead. Please try your question again.';
-        } else {
-          errorMessage = error.message;
-        }
-      }
-      
-      setError(errorMessage);
-      const errorResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: "I apologize, but I'm currently experiencing technical difficulties. Please try again in a few minutes.",
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions'
-      };
-      setMessages(prev => [...prev, errorResponse]);
-    } finally {
-      setIsLoading(false);
-    }
+  const handleFieldChange = (fieldId: string, value: string) => {
+    setFormData(prev => ({ ...prev, [fieldId]: value }));
   };
 
   const loadChatHistory = async (userId: string) => {
@@ -1224,6 +1000,75 @@ const TaxAssistant: React.FC = () => {
               </div>
             )}
             
+            {showForm && (
+              <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+                <h3 className="text-xl font-semibold mb-4">
+                  {documentType} Information
+                </h3>
+                <form onSubmit={handleFormSubmit} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {formFields.map((field, index) => (
+                      <div key={field.id} className={formStep === Math.floor(index / 2) ? 'block' : 'hidden'}>
+                        <label htmlFor={field.id} className="block text-sm font-medium text-gray-700 mb-2">
+                          {field.label} {field.required && <span className="text-red-500">*</span>}
+                        </label>
+                        <input
+                          type={field.type}
+                          id={field.id}
+                          value={formData[field.id] || ''}
+                          onChange={(e) => handleFieldChange(field.id, e.target.value)}
+                          required={field.required}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <div className="flex justify-between mt-6">
+                    {formStep > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFormStep(prev => prev - 1)}
+                        className="px-4 py-2 text-gray-600 hover:text-gray-900 flex items-center gap-2"
+                      >
+                        <ChevronRight className="w-5 h-5 rotate-180" />
+                        Previous
+                      </button>
+                    )}
+                    
+                    {formStep < Math.ceil(formFields.length / 2) - 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => setFormStep(prev => prev + 1)}
+                        className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                      >
+                        Next
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={isGeneratingDocument}
+                        className="ml-auto px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isGeneratingDocument ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            Generate Document
+                            <ChevronRight className="w-5 h-5" />
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+            )}
+            
             <div ref={messagesEndRef} />
           </div>
         </div>
@@ -1276,3 +1121,5 @@ const TaxAssistant: React.FC = () => {
 };
 
 export default TaxAssistant;
+
+export default TaxAssistant
