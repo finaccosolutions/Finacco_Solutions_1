@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Settings, Send, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import DocumentRequestHandler from './DocumentRequestHandler';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -26,6 +27,8 @@ const ChatPage: React.FC = () => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [showDocumentForm, setShowDocumentForm] = useState(false);
+  const [currentUserMessage, setCurrentUserMessage] = useState<string>('');
 
   useEffect(() => {
     checkApiKey();
@@ -59,35 +62,40 @@ const ChatPage: React.FC = () => {
     const userMessage = input.trim();
     setInput('');
     setLoading(true);
+    setCurrentUserMessage(userMessage);
+    setShowDocumentForm(true);
 
     try {
       setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: userMessage
+      // Only proceed with Gemini API call if not handling a document request
+      if (!showDocumentForm) {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: userMessage
+                }]
               }]
-            }]
-          })
+            })
+          }
+        );
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error?.message || 'Failed to get response');
         }
-      );
 
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to get response');
+        const assistantMessage = data.candidates[0]?.content?.parts?.[0]?.text || 'Sorry, I could not generate a response.';
+        setMessages(prev => [...prev, { role: 'assistant', content: assistantMessage }]);
       }
-
-      const assistantMessage = data.candidates[0]?.content?.parts?.[0]?.text || 'Sorry, I could not generate a response.';
-      setMessages(prev => [...prev, { role: 'assistant', content: assistantMessage }]);
     } catch (error) {
       console.error('Error sending message:', error);
       setMessages(prev => [...prev, { 
@@ -97,6 +105,11 @@ const ChatPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDocumentGenerated = (documentContent: string) => {
+    setMessages(prev => [...prev, { role: 'assistant', content: documentContent }]);
+    setShowDocumentForm(false);
   };
 
   return (
@@ -139,6 +152,13 @@ const ChatPage: React.FC = () => {
                   <Loader2 className="w-5 h-5 animate-spin text-gray-600" />
                 </div>
               </div>
+            )}
+            {showDocumentForm && apiKey && (
+              <DocumentRequestHandler
+                userMessage={currentUserMessage}
+                onDocumentGenerated={handleDocumentGenerated}
+                apiKey={apiKey}
+              />
             )}
           </div>
 
