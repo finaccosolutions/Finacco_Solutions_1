@@ -288,579 +288,297 @@ const TaxAssistant: React.FC = () => {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  if (!input.trim() || isLoading) return;
+  
+  setIsLoading(true);
+  setError(null);
+
+  const userMessage: Message = {
+    id: Date.now().toString(),
+    role: 'user',
+    content: input,
+    timestamp: new Date().toISOString()
+  };
+
+  setMessages(prev => [...prev, userMessage]);
+  setInput('');
+
+  try {
+    // First check if this is a document request using Gemini
+    const isDocRequest = await checkIfDocumentRequest(input);
     
-    if (!input.trim() || isLoading) return;
-    
-    if (!checkRateLimit()) return;
-    
-    setIsLoading(true);
-    setError(null);
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input,
-      timestamp: new Date().toISOString(),
-      name: user?.email?.split('@')[0]
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-
-    try {
-      // Check for document generation requests
-      if (/^(draft|create|generate|write)\s+an?\s+/i.test(input)) {
-        await handleDocumentRequest(input);
-        setIsLoading(false);
-        return;
-      }
-
-      // Check for Finacco-specific responses
-      const finaccoResponse = getFinaccoResponse(input);
-      if (finaccoResponse) {
-        const assistantMessage: Message = {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: formatResponse(finaccoResponse),
-          timestamp: new Date().toISOString(),
-          name: 'Finacco Solutions'
-        };
-        
-        setMessages(prev => [...prev, assistantMessage]);
-        await saveToHistory([...messages, userMessage, assistantMessage], input);
-        return;
-      }
-
-      // Set up typing animation
-      const typingMessageId = Date.now().toString();
-      setTypingMessage({
-        id: typingMessageId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions',
-        isTyping: true
-      });
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `You are a tax and financial advisor assistant for Finacco Solutions. Respond to this query professionally and accurately: ${input}`
-                  }
-                ]
-              }
-            ],
-            generationConfig: {
-              temperature: 0.7,
-              topK: 1,
-              topP: 1,
-              maxOutputTokens: 2048,
-            }
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        throw new Error('Invalid response format from API');
-      }
-
-      const assistantMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: formatResponse(data.candidates[0].content.parts[0].text),
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions'
-      };
-
-      setTypingMessage(null);
-      setMessages(prev => [...prev, assistantMessage]);
-      await saveToHistory([...messages, userMessage, assistantMessage], input);
-
-    } catch (error) {
-      console.error('Error processing request:', error);
-      setError('Failed to process your request. Please try again.');
-      setMessages(prev => prev.filter(msg => msg.id !== userMessage.id));
-    } finally {
+    if (isDocRequest) {
+      setIsDocumentMode(true);
+      await handleDocumentRequest(input);
       setIsLoading(false);
-      setTypingMessage(null);
-    }
-  };
-
-  const handleDocumentRequest = async (query: string) => {
-    setIsDocumentMode(true);
-    const docType = query.replace(/^(draft|create|generate|write)\s+an?\s+/i, '').trim();
-    setDocumentType(docType);
-    
-    try {
-      // Define form fields based on document type
-      let documentFields: DocumentField[] = [];
-      
-      switch (docType.toLowerCase()) {
-        case 'invoice':
-          documentFields = [
-            {
-              id: 'invoiceNumber',
-              label: 'Invoice Number',
-              type: 'text',
-              required: true,
-              placeholder: 'e.g., INV-2025-001'
-            },
-            {
-              id: 'clientName',
-              label: 'Client Name',
-              type: 'text',
-              required: true,
-              placeholder: 'Enter client name'
-            },
-            {
-              id: 'clientAddress',
-              label: 'Client Address',
-              type: 'text',
-              required: true,
-              placeholder: 'Enter client address'
-            },
-            {
-              id: 'invoiceDate',
-              label: 'Invoice Date',
-              type: 'date',
-              required: true
-            },
-            {
-              id: 'dueDate',
-              label: 'Due Date',
-              type: 'date',
-              required: true
-            },
-            {
-              id: 'items',
-              label: 'Items (one per line with price, e.g., "Web Design - $500")',
-              type: 'text',
-              required: true,
-              placeholder: 'Enter items and prices'
-            },
-            {
-              id: 'notes',
-              label: 'Additional Notes',
-              type: 'text',
-              required: false,
-              placeholder: 'Any additional notes'
-            }
-          ];
-          break;
-          
-        case 'receipt':
-          documentFields = [
-            {
-              id: 'receiptNumber',
-              label: 'Receipt Number',
-              type: 'text',
-              required: true,
-              placeholder: 'e.g., RCP-2025-001'
-            },
-            {
-              id: 'customerName',
-              label: 'Customer Name',
-              type: 'text',
-              required: true,
-              placeholder: 'Enter customer name'
-            },
-            {
-              id: 'date',
-              label: 'Date',
-              type: 'date',
-              required: true
-            },
-            {
-              id: 'amount',
-              label: 'Amount',
-              type: 'number',
-              required: true,
-              placeholder: 'Enter amount'
-            },
-            {
-              id: 'paymentMethod',
-              label: 'Payment Method',
-              type: 'text',
-              required: true,
-              placeholder: 'e.g., Cash, Card, Bank Transfer'
-            },
-            {
-              id: 'description',
-              label: 'Description',
-              type: 'text',
-              required: true,
-              placeholder: 'Enter payment description'
-            }
-          ];
-          break;
-          
-        case 'quotation':
-          documentFields = [
-            {
-              id: 'quotationNumber',
-              label: 'Quotation Number',
-              type: 'text',
-              required: true,
-              placeholder: 'e.g., QT-2025-001'
-            },
-            {
-              id: 'clientName',
-              label: 'Client Name',
-              type: 'text',
-              required: true,
-              placeholder: 'Enter client name'
-            },
-            {
-              id: 'clientEmail',
-              label: 'Client Email',
-              type: 'email',
-              required: true,
-              placeholder: 'Enter client email'
-            },
-            {
-              id: 'validUntil',
-              label: 'Valid Until',
-              type: 'date',
-              required: true
-            },
-            {
-              id: 'items',
-              label: 'Items (one per line with price)',
-              type: 'text',
-              required: true,
-              placeholder: 'Enter items and prices'
-            },
-            {
-              id: 'terms',
-              label: 'Terms and Conditions',
-              type: 'text',
-              required: false,
-              placeholder: 'Enter terms and conditions'
-            }
-          ];
-          break;
-          
-        default:
-          documentFields = [
-            {
-              id: 'title',
-              label: 'Document Title',
-              type: 'text',
-              required: true,
-              placeholder: `Enter ${docType} title`
-            },
-            {
-              id: 'date',
-              label: 'Date',
-              type: 'date',
-              required: true
-            },
-            {
-              id: 'content',
-              label: 'Content',
-              type: 'text',
-              required: true,
-              placeholder: `Enter ${docType} content`
-            }
-          ];
-      }
-
-      setFormFields(documentFields);
-      setFormStep(0);
-      setShowForm(true);
-      
-      const assistantMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: `Let's create a ${docType}. Please fill in the required information:`,
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions'
-      };
-      
-      setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
-      console.error('Error setting up document form:', error);
-      setError('Failed to set up document form. Please try again.');
-      setIsDocumentMode(false);
-      setFormFields([]);
-      setShowForm(false);
-    }
-  };
-
-  const generateDocument = async (formData: Record<string, string>, docType: string) => {
-    let documentContent = '';
-    const currentDate = new Date().toLocaleDateString();
-    
-    switch (docType.toLowerCase()) {
-      case 'invoice':
-        const items = formData.items.split('\n').map(item => {
-          const [description, price] = item.split('-').map(s => s.trim());
-          return { description, price };
-        });
-        
-        const total = items.reduce((sum, item) => {
-          const price = parseFloat(item.price.replace(/[^0-9.-]+/g, ''));
-          return sum + (isNaN(price) ? 0 : price);
-        }, 0);
-        
-        documentContent = `
-          <div class="max-w-2xl mx-auto p-8 bg-white shadow-lg rounded-lg">
-            <div class="flex justify-between items-start mb-8">
-              <div>
-                <h1 class="text-3xl font-bold text-gray-800">INVOICE</h1>
-                <p class="text-gray-600 mt-1">Invoice #: ${formData.invoiceNumber}</p>
-              </div>
-              <div class="text-right">
-                <p class="font-medium">Date: ${formData.invoiceDate}</p>
-                <p class="text-gray-600">Due Date: ${formData.dueDate}</p>
-              </div>
-            </div>
-            
-            <div class="mb-8">
-              <h2 class="text-lg font-semibold text-gray-700 mb-2">Bill To:</h2>
-              <p class="text-gray-600">${formData.clientName}</p>
-              <p class="text-gray-600">${formData.clientAddress}</p>
-            </div>
-            
-            <div class="mb-8">
-              <table class="w-full">
-                <thead>
-                  <tr class="border-b-2 border-gray-200">
-                    <th class="text-left py-2">Description</th>
-                    <th class="text-right py-2">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${items.map(item => `
-                    <tr class="border-b border-gray-100">
-                      <td class="py-2">${item.description}</td>
-                      <td class="text-right py-2">${item.price}</td>
-                    </tr>
-                  `).join('')}
-                  <tr class="font-bold">
-                    <td class="py-2">Total</td>
-                    <td class="text-right py-2">$${total.toFixed(2)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            
-            ${formData.notes ? `
-              <div class="mb-8">
-                <h2 class="text-lg font-semibold text-gray-700 mb-2">Notes:</h2>
-                <p class="text-gray-600">${formData.notes}</p>
-              </div>
-            ` : ''}
-            
-            <div class="text-gray-600 text-sm">
-              <p>Thank you for your business!</p>
-              <p>Please make payment by the due date.</p>
-            </div>
-          </div>
-        `;
-        break;
-        
-      case 'receipt':
-        documentContent = `
-          <div class="max-w-md mx-auto p-6 bg-white shadow-lg rounded-lg">
-            <div class="text-center mb-6">
-              <h1 class="text-2xl font-bold text-gray-800">RECEIPT</h1>
-              <p class="text-gray-600">Receipt #: ${formData.receiptNumber}</p>
-            </div>
-            
-            <div class="space-y-4">
-              <div class="flex justify-between">
-                <span class="text-gray-600">Date:</span>
-                <span class="font-medium">${formData.date}</span>
-              </div>
-              
-              <div class="flex justify-between">
-                <span class="text-gray-600">Received From:</span>
-                <span class="font-medium">${formData.customerName}</span>
-              </div>
-              
-              <div class="flex justify-between">
-                <span class="text-gray-600">Amount:</span>
-                <span class="font-medium">$${parseFloat(formData.amount).toFixed(2)}</span>
-              </div>
-              
-              <div class="flex justify-between">
-                <span class="text-gray-600">Payment Method:</span>
-                <span class="font-medium">${formData.paymentMethod}</span>
-              </div>
-              
-              <div class="border-t pt-4 mt-4">
-                <p class="text-gray-600">Description:</p>
-                <p class="font-medium">${formData.description}</p>
-              </div>
-            </div>
-            
-            <div class="mt-8 pt-4 border-t text-center text-gray-500 text-sm">
-              <p>Thank you for your payment!</p>
-            </div>
-          </div>
-        `;
-        break;
-        
-      case 'quotation':
-        const quoteItems = formData.items.split('\n').map(item => {
-          const [description, price] = item.split('-').map(s => s.trim());
-          return { description, price };
-        });
-        
-        const quoteTotal = quoteItems.reduce((sum, item) => {
-          const price = parseFloat(item.price.replace(/[^0-9.-]+/g, ''));
-          return sum + (isNaN(price) ? 0 : price);
-        }, 0);
-        
-        documentContent = `
-          <div class="max-w-2xl mx-auto p-8 bg-white shadow-lg rounded-lg">
-            <div class="flex justify-between items-start mb-8">
-              <div>
-                <h1 class="text-3xl font-bold text-gray-800">QUOTATION</h1>
-                <p class="text-gray-600 mt-1">Quote #: ${formData.quotationNumber}</p>
-              </div>
-              <div class="text-right">
-                <p class="font-medium">Date: ${currentDate}</p>
-                <p class="text-gray-600">Valid Until: ${formData.validUntil}</p>
-              </div>
-            </div>
-            
-            <div class="mb-8">
-              <h2 class="text-lg font-semibold text-gray-700 mb-2">Client Information:</h2>
-              <p class="text-gray-600">${formData.clientName}</p>
-              <p class="text-gray-600">${formData.clientEmail}</p>
-            </div>
-            
-            <div class="mb-8">
-              <table class="w-full">
-                <thead>
-                  <tr class="border-b-2 border-gray-200">
-                    <th class="text-left py-2">Description</th>
-                    <th class="text-right py-2">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${quoteItems.map(item => `
-                    <tr class="border-b border-gray-100">
-                      <td class="py-2">${item.description}</td>
-                      <td class="text-right py-2">${item.price}</td>
-                    </tr>
-                  `).join('')}
-                  <tr class="font-bold">
-                    <td class="py-2">Total</td>
-                    <td class="text-right py-2">$${quoteTotal.toFixed(2)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            
-            ${formData.terms ? `
-              <div class="mb-8">
-                <h2 class="text-lg font-semibold text-gray-700 mb-2">Terms and Conditions:</h2>
-                <p class="text-gray-600">${formData.terms}</p>
-              </div>
-            ` : ''}
-            
-            <div class="text-gray-600 text-sm">
-              <p>This is a quotation on the goods/services named, subject to the conditions noted below:</p>
-              <ul class="list-disc ml-5 mt-2">
-                <li>This quotation is valid until ${formData.validUntil}</li>
-                <li>Prices are subject to change without notice</li>
-                <li>Terms of payment to be agreed upon confirmation</li>
-              </ul>
-            </div>
-          </div>
-        `;
-        break;
-        
-      default:
-        documentContent = `
-          <div class="max-w-2xl mx-auto p-8 bg-white shadow-lg rounded-lg">
-            <div class="mb-8">
-              <h1 class="text-3xl font-bold text-gray-800">${formData.title}</h1>
-              <p class="text-gray-600 mt-2">Date: ${formData.date}</p>
-            </div>
-            
-            <div class="prose max-w-none">
-              ${formData.content}
-            </div>
-          </div>
-        `;
-    }
-    
-    return documentContent;
-  };
-
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateForm(formData, formFields)) {
-      setError('Please correct the errors in the form');
       return;
     }
 
-    setIsGeneratingDocument(true);
-    setError(null);
+    // Normal message handling
+    const typingMessageId = Date.now().toString();
+    setTypingMessage({
+      id: typingMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      name: 'Assistant',
+      isTyping: true
+    });
 
-    try {
-      const documentContent = await generateDocument(formData, documentType);
-      
+    const finaccoResponse = getFinaccoResponse(input);
+    if (finaccoResponse) {
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: `
-          <div class="space-y-6">
-            ${documentContent}
-            <div class="flex justify-end">
-              <button
-                onclick="downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`)"
-                class="inline-flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <span>Download PDF</span>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-        `,
-        timestamp: new Date().toISOString(),
-        name: 'Finacco Solutions',
-        isDocument: true
+        content: formatResponse(finaccoResponse),
+        timestamp: new Date().toISOString()
       };
-      
       setMessages(prev => [...prev, assistantMessage]);
-      setIsDocumentMode(false);
-      setShowForm(false);
-      setFormFields([]);
-      setFormData({});
-      setFormStep(0);
-      setFormErrors({});
-    } catch (error) {
-      console.error('Error generating document:', error);
-      setError('Failed to generate document. Please try again.');
-    } finally {
-      setIsGeneratingDocument(false);
+      setIsLoading(false);
+      return;
     }
-  };
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `You are a helpful assistant. Respond to this query: ${input}`
+            }]
+          }]
+        })
+      }
+    );
+
+    if (!response.ok) throw new Error('API request failed');
+
+    const data = await response.json();
+    const responseText = data.candidates[0]?.content?.parts?.[0]?.text;
+
+    const assistantMessage: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: formatResponse(responseText),
+      timestamp: new Date().toISOString()
+    };
+
+    setMessages(prev => [...prev, assistantMessage]);
+    await saveToHistory([...messages, userMessage, assistantMessage], input);
+    
+  } catch (error) {
+    console.error('Error processing request:', error);
+    setError('Failed to process your request. Please try again.');
+  } finally {
+    setIsLoading(false);
+    setTypingMessage(null);
+  }
+};
+
+const checkIfDocumentRequest = async (text: string): Promise<boolean> => {
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `Is this a request to create a document? Only respond with "true" or "false": "${text}"`
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 5
+          }
+        })
+      }
+    );
+
+    const data = await response.json();
+    return data.candidates[0]?.content?.parts?.[0]?.text?.toLowerCase().trim() === 'true';
+  } catch (error) {
+    console.error('Error checking document request:', error);
+    return false;
+  }
+};
+
+const handleDocumentRequest = async (query: string) => {
+  setIsDocumentMode(true);
+  setError(null);
+
+  try {
+    // Ask Gemini what fields are needed for this document
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `User wants to create a document based on: "${query}". 
+              What type of document is this? 
+              What fields are needed? Respond in JSON format:
+              {
+                "documentType": "string",
+                "fields": [
+                  {
+                    "id": "string",
+                    "label": "string",
+                    "type": "text|email|tel|date|number|textarea",
+                    "required": boolean,
+                    "placeholder": "string",
+                    "description": "string"
+                  }
+                ]
+              }`
+            }]
+          }]
+        })
+      }
+    );
+
+    const data = await response.json();
+    const resultText = data.candidates[0]?.content?.parts?.[0]?.text;
+    
+    // Extract JSON from response (Gemini might add markdown or other formatting)
+    const jsonStart = resultText.indexOf('{');
+    const jsonEnd = resultText.lastIndexOf('}') + 1;
+    const jsonString = resultText.slice(jsonStart, jsonEnd);
+    const result = JSON.parse(jsonString);
+
+    setDocumentType(result.documentType);
+    setFormFields(result.fields);
+    setShowForm(true);
+    
+    const assistantMessage: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: `Let's create a ${result.documentType}. Please fill in the required information:`,
+      timestamp: new Date().toISOString()
+    };
+    
+    setMessages(prev => [...prev, assistantMessage]);
+
+  } catch (error) {
+    console.error('Error setting up document form:', error);
+    setError('Failed to set up document form. Please try again.');
+    setIsDocumentMode(false);
+    setFormFields([]);
+    setShowForm(false);
+  }
+};
+
+const generateDocument = async (data: Record<string, string>, docType: string) => {
+  console.log('Starting document generation with:', { data, docType }); // Add this
+  
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `Create a professional ${docType} document using this data:
+              ${JSON.stringify(data)}
+              
+              Respond with the HTML content for the document wrapped in <document></document> tags`
+            }]
+          }]
+        })
+      }
+    );
+
+    console.log('API response status:', response.status); // Add this
+    
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('API response:', result); // Add this
+    
+    const content = result.candidates[0]?.content?.parts?.[0]?.text;
+    console.log('Raw content:', content); // Add this
+    
+    const docContent = content.match(/<document>(.*?)<\/document>/s)?.[1] || content;
+    console.log('Extracted content:', docContent); // Add this
+    
+    return docContent;
+  } catch (error) {
+    console.error('Error in generateDocument:', error);
+    throw error;
+  }
+};
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  console.log('Form submitted'); // Add this line
+  
+  if (!validateForm(formData, formFields)) {
+    console.log('Form validation failed', formErrors); // Add this
+    setError('Please correct the errors in the form');
+    return;
+  }
+
+  console.log('Form data:', formData); // Add this to verify collected data
+  
+  setIsGeneratingDocument(true);
+  setError(null);
+
+  try {
+    console.log('Generating document...'); // Add this
+    const documentContent = await generateDocument(formData, documentType);
+    console.log('Generated content:', documentContent); // Add this
+    
+    const assistantMessage: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: `
+        <div class="space-y-6">
+          ${documentContent}
+          <div class="flex justify-end">
+            <button
+              onclick="window.downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`, '${documentType}')"
+              class="inline-flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <span>Download PDF</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `,
+      timestamp: new Date().toISOString(),
+      isDocument: true
+    };
+    
+    setMessages(prev => [...prev, assistantMessage]);
+    setIsDocumentMode(false);
+    setShowForm(false);
+    setFormFields([]);
+    setFormData({});
+    setFormStep(0);
+    setFormErrors({});
+  } catch (error) {
+    console.error('Error generating document:', error);
+    setError(error.message);
+  } finally {
+    setIsGeneratingDocument(false);
+  }
+};
 
   const validateForm = (data: Record<string, string>, fields: DocumentField[]): boolean => {
     const errors: Record<string, string> = {};
@@ -990,6 +708,36 @@ const TaxAssistant: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+useEffect(() => {
+  window.downloadDocument = (content: string, docType: string) => {
+    console.log('Attempting to download:', { docType }); // Add this
+    
+    try {
+      const element = document.createElement('div');
+      element.innerHTML = content;
+      console.log('Created element:', element); // Add this
+      
+      const opt = {
+        margin: 1,
+        filename: `${docType.toLowerCase().replace(/\s+/g, '_')}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      };
+
+      console.log('PDF options:', opt); // Add this
+      html2pdf().set(opt).from(element).save();
+      console.log('Download initiated'); // Add this
+    } catch (error) {
+      console.error('Download error:', error);
+    }
+  };
+
+  return () => {
+    delete window.downloadDocument;
+  };
+}, []);
 
   const checkRateLimit = (): boolean => {
     const now = Date.now();

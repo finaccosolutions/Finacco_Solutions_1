@@ -19,44 +19,54 @@ const DocumentRequestHandler: React.FC<DocumentRequestHandlerProps> = ({
 
   // Analyze the user's message to determine document type
   React.useEffect(() => {
-    const analyzeRequest = async () => {
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              contents: [{
-                parts: [{
-                  text: `Analyze this request and determine what type of document the user wants to create. Only respond with one of these exact words: "invoice", "receipt", "quotation", or "other". If the request is not about creating a document, respond with "none". Request: "${userMessage}"`
-                }]
+  const analyzeRequest = async () => {
+    try {
+      // Ask Gemini to determine if this is a document request and what fields are needed
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: `Analyze this request and determine:
+                1. Is this a request to create a document? (true/false)
+                2. If true, what document type is being requested?
+                3. What fields are needed? Provide as JSON array:
+                  [{"id":"field1","label":"Field 1","type":"text","required":true}]
+                
+                Respond in this exact JSON format:
+                {
+                  "isDocumentRequest": boolean,
+                  "documentType": string|null,
+                  "fields": array|null
+                }
+                
+                Request: "${userMessage}"`
               }]
-            })
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error('Failed to analyze request');
+            }]
+          })
         }
-
-        const data = await response.json();
-        const documentType = data.candidates[0]?.content?.parts?.[0]?.text?.toLowerCase().trim();
-
-        if (documentType && documentType !== 'none') {
-          setDocumentType(documentType);
-        } else {
-          setError('This request does not appear to be for document creation.');
-        }
-      } catch (error) {
-        console.error('Error analyzing request:', error);
-        setError('Failed to analyze your request. Please try again.');
-      } finally {
-        setLoading(false);
+      );
+  
+      const data = await response.json();
+      const resultText = data.candidates[0]?.content?.parts?.[0]?.text;
+      const result = JSON.parse(resultText);
+  
+      if (result.isDocumentRequest && result.fields) {
+        setDocumentType(result.documentType || 'custom');
+        setDocumentFields(result.fields);
+      } else {
+        setError('Please specify what document you want to create.');
       }
-    };
+    } catch (error) {
+      console.error('Error analyzing request:', error);
+      setError('Failed to analyze your request. Please try being more specific.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
     analyzeRequest();
   }, [userMessage, apiKey]);
