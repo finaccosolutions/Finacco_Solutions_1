@@ -1587,5 +1587,3 @@ const TaxAssistant: React.FC = () => {
 };
 
 export default TaxAssistant;
-
-export default TaxAssistant
