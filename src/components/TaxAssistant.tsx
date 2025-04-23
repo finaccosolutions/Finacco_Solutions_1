@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Send, Loader2, Brain, Trash2, AlertCircle, LogOut, Menu, Plus, Home, MessageSquare, Key, Download, ChevronRight } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import html2pdf from 'html2pdf.js'; // Ensure this is imported
+import html2pdf from 'html2pdf.js';
 import Auth from './Auth';
 import ApiKeySetup from './ApiKeySetup';
 import { supabase } from '../lib/supabase';
@@ -765,7 +765,6 @@ const TaxAssistant: React.FC = () => {
       throw new Error("Failed to generate document. Please try again.");
     }
   };
-  
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -796,7 +795,6 @@ const TaxAssistant: React.FC = () => {
         isDocument: true
       };
 
-<<<<<<< HEAD
       const updatedMessages = [...messages, assistantMessage, documentMessage];
       setMessages(updatedMessages);
       
@@ -811,334 +809,6 @@ const TaxAssistant: React.FC = () => {
       setIsGeneratingDocument(false);
     }
   };
-=======
-    const assistantMessage: Message = {
-      id: Date.now().toString(),
-      role: 'assistant',
-      content: formatResponse(responseText),
-      timestamp: new Date().toISOString()
-    };
-
-    setMessages(prev => [...prev, assistantMessage]);
-    await saveToHistory([...messages, userMessage, assistantMessage], input);
-    
-  } catch (error) {
-    console.error('Error processing request:', error);
-    setError('Failed to process your request. Please try again.');
-  } finally {
-    setIsLoading(false);
-    setTypingMessage(null);
-  }
-};
-
-const checkIfDocumentRequest = async (text: string): Promise<boolean> => {
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `Is this a request to create a document? Only respond with "true" or "false": "${text}"`
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 5
-          }
-        })
-      }
-    );
-
-    const data = await response.json();
-    return data.candidates[0]?.content?.parts?.[0]?.text?.toLowerCase().trim() === 'true';
-  } catch (error) {
-    console.error('Error checking document request:', error);
-    return false;
-  }
-};
-
-const handleDocumentRequest = async (query: string) => {
-  setIsDocumentMode(true);
-  setError(null);
-
-  try {
-    // Extract document type from query
-    const docType = query.replace(/(draft|create|generate|write)\s+(a|an)?\s*/i, '').trim();
-    setDocumentType(docType);
-    
-    // Get required fields from Gemini
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `What fields are needed to create a ${docType}? 
-              Respond in JSON format:
-              {
-                "fields": [
-                  {
-                    "id": "string",
-                    "label": "string",
-                    "type": "text|email|tel|date|number|textarea",
-                    "required": boolean,
-                    "placeholder": "string",
-                    "description": "string"
-                  }
-                ]
-              }`
-            }]
-          }]
-        })
-      }
-    );
-
-    const data = await response.json();
-    const resultText = data.candidates[0]?.content?.parts?.[0]?.text;
-    const jsonMatch = resultText.match(/{[\s\S]*}/);
-    const result = jsonMatch ? JSON.parse(jsonMatch[0]) : { fields: [] };
-
-    setFormFields(result.fields.length > 0 ? result.fields : getDefaultFields(docType));
-    setShowForm(true);
-    
-    const assistantMessage: Message = {
-      id: Date.now().toString(),
-      role: 'assistant',
-      content: `Let's create a ${docType}. Please provide the following information:`,
-      timestamp: new Date().toISOString()
-    };
-    
-    setMessages(prev => [...prev, assistantMessage]);
-  } catch (error) {
-    console.error('Error setting up document form:', error);
-    setError('Failed to set up document form. Please try again.');
-    setIsDocumentMode(false);
-    setFormFields([]);
-    setShowForm(false);
-  }
-};
-
-// Fallback fields if AI fails
-const getDefaultFields = (docType: string): DocumentField[] => [
-  {
-    id: 'title',
-    label: 'Document Title',
-    type: 'text',
-    required: true,
-    placeholder: `Enter ${docType} title`
-  },
-  {
-    id: 'parties',
-    label: 'Parties Involved',
-    type: 'textarea',
-    required: true,
-    placeholder: 'List all parties involved'
-  },
-  {
-    id: 'details',
-    label: 'Document Details',
-    type: 'textarea',
-    required: true,
-    placeholder: 'Enter all relevant details'
-  },
-  {
-    id: 'date',
-    label: 'Effective Date',
-    type: 'date',
-    required: true
-  }
-];
-
-const generateDocument = async (data: Record<string, string>, docType: string) => {
-  try {
-    // First try AI generation with strict instructions
-    try {
-      const aiContent = await generateWithAI(data, docType);
-      if (aiContent) return aiContent;
-    } catch (aiError) {
-      console.warn("AI generation failed, using fallback", aiError);
-    }
-
-    // Fallback to robust template
-    return generateFallbackDocument(data, docType);
-  } catch (error) {
-    console.error("Document generation error:", error);
-    throw new Error("Failed to generate document. Please try again.");
-  }
-};
-
-const generateWithAI = async (data: Record<string, string>, docType: string) => {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: `Create a professional ${docType} document in HTML format using EXACTLY this data:
-            ${JSON.stringify(data)}
-            
-            Requirements:
-            1. Use standard business document structure
-            2. Include all user data in proper sections
-            3. Add professional styling with inline CSS
-            4. Include signature lines if appropriate
-            5. Format dates and numbers properly
-            
-            Return ONLY the HTML with:
-            - Proper headings
-            - Organized sections
-            - All user data incorporated
-            - No placeholder text`
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.3 // More deterministic output
-        }
-      })
-    }
-  );
-
-  if (!response.ok) throw new Error("API request failed");
-  
-  const result = await response.json();
-  const content = result.candidates[0]?.content?.parts?.[0]?.text;
-  return content.replace(/^```html|```$/g, "").trim();
-};
-
-const generateFallbackDocument = (data: Record<string, string>, docType: string) => {
-  const currentDate = new Date().toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric"
-  });
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .document { max-width: 800px; margin: 0 auto; padding: 30px; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #eee; padding-bottom: 20px; }
-        h1 { color: #2c3e50; margin-bottom: 10px; }
-        .section { margin-bottom: 25px; }
-        .section-title { border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 15px; color: #2c3e50; }
-        .field { margin-bottom: 15px; }
-        .field-label { font-weight: bold; display: block; margin-bottom: 5px; }
-        .signatures { display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; }
-        .signature-box { width: 45%; }
-        .signature-line { border-top: 1px solid #ccc; margin-top: 30px; padding-top: 5px; }
-      </style>
-    </head>
-    <body>
-      <div class="document">
-        <div class="header">
-          <h1>${docType.toUpperCase()}</h1>
-          <p>Date: ${currentDate}</p>
-        </div>
-        
-        ${Object.entries(data)
-          .filter(([_, value]) => value)
-          .map(([key, value]) => `
-            <div class="section">
-              <h3 class="section-title">${formatFieldLabel(key)}</h3>
-              <div class="field-content">
-                ${value.split("\n").map(para => `<p>${para}</p>`).join("")}
-              </div>
-            </div>
-          `).join("")}
-        
-        <div class="signatures">
-          <div class="signature-box">
-            <div class="signature-line">Authorized Signature</div>
-            <p>Date: _______________</p>
-          </div>
-          <div class="signature-box">
-            <div class="signature-line">Recipient Signature</div>
-            <p>Date: _______________</p>
-          </div>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
-};
-
-const formatFieldLabel = (key: string) => {
-  return key
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, str => str.toUpperCase())
-    .replace(/([a-z])([A-Z])/g, "$1 $2");
-};
-
-  const handleFormSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  console.log('Form submitted'); // Add this line
-  
-  if (!validateForm(formData, formFields)) {
-    console.log('Form validation failed', formErrors); // Add this
-    setError('Please correct the errors in the form');
-    return;
-  }
-
-  console.log('Form data:', formData); // Add this to verify collected data
-  
-  setIsGeneratingDocument(true);
-  setError(null);
-
-  try {
-    console.log('Generating document...'); // Add this
-    const documentContent = await generateDocument(formData, documentType);
-    console.log('Generated content:', documentContent); // Add this
-    
-    const assistantMessage: Message = {
-      id: Date.now().toString(),
-      role: 'assistant',
-      content: `
-        <div class="space-y-6">
-          ${documentContent}
-          <div class="flex justify-end">
-            <button
-              onclick="window.downloadDocument(\`${documentContent.replace(/`/g, '\\`')}\`, '${documentType}')"
-              class="inline-flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <span>Download PDF</span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      `,
-      timestamp: new Date().toISOString(),
-      isDocument: true
-    };
-    
-    setMessages(prev => [...prev, assistantMessage]);
-    setIsDocumentMode(false);
-    setShowForm(false);
-    setFormFields([]);
-    setFormData({});
-    setFormStep(0);
-    setFormErrors({});
-  } catch (error) {
-    console.error('Error generating document:', error);
-    setError(error.message);
-  } finally {
-    setIsGeneratingDocument(false);
-  }
-};
->>>>>>> 2dd3a1bacddd6c5dedc6e783b5bf259d46c3fda6
 
   const validateForm = (data: Record<string, string>, fields: DocumentField[]): boolean => {
     const errors: Record<string, string> = {};
@@ -1268,66 +938,6 @@ const formatFieldLabel = (key: string) => {
     scrollToBottom();
   }, [messages]);
 
-<<<<<<< HEAD
-=======
-// Add this useEffect with your other hooks
-useEffect(() => {
-  const handleDownload = (htmlContent: string, fileName: string) => {
-    try {
-      // Create a hidden iframe for printing
-      const iframe = document.createElement("iframe");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.srcdoc = htmlContent;
-      
-      document.body.appendChild(iframe);
-      
-      iframe.onload = () => {
-        setTimeout(() => {
-          const opt = {
-            margin: 10,
-            filename: `${fileName.replace(/[^a-z0-9]/gi, "_")}.pdf`,
-            image: { type: "jpeg", quality: 0.98 },
-            html2canvas: { 
-              scale: 2,
-              logging: true,
-              useCORS: true,
-              allowTaint: true
-            },
-            jsPDF: { 
-              unit: "mm",
-              format: "a4",
-              orientation: "portrait" 
-            }
-          };
-          
-          html2pdf()
-            .set(opt)
-            .from(iframe.contentDocument?.body || document.body)
-            .save()
-            .finally(() => {
-              document.body.removeChild(iframe);
-            });
-        }, 500);
-      };
-    } catch (error) {
-      console.error("Download failed:", error);
-      alert("Failed to generate PDF. Please try again.");
-    }
-  };
-
-  window.downloadDocument = handleDownload;
-
-  return () => {
-    delete window.downloadDocument;
-  };
-}, []);
-
->>>>>>> 2dd3a1bacddd6c5dedc6e783b5bf259d46c3fda6
   const checkRateLimit = (): boolean => {
     const now = Date.now();
     requestTimestamps.current = requestTimestamps.current.filter(
@@ -1938,7 +1548,7 @@ useEffect(() => {
       </button>
     </div>
     <div className="mt-2 flex justify-center gap-2">
-      <span className="text-xs text-gray-500">Try: "Draft a rental agreement" or "Explain GST rates in India"</span>
+      <span className="text-xs text-gray-500">Try: "Draft" for Draft any Document or ask any question</span>
     </div>
   </div>
 </form>
