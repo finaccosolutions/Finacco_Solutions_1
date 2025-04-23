@@ -10,6 +10,7 @@ import WhatsAppButton from './components/WhatsAppButton';
 import TaxAssistant from './components/TaxAssistant';
 import Auth from './components/Auth';
 import ApiKeySetup from './components/ApiKeySetup';
+import UserProfile from './components/UserProfile';
 import { supabase } from './lib/supabase';
 
 interface ProtectedRouteProps {
@@ -66,11 +67,13 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
 const AppContent = () => {
   const location = useLocation();
-  const isTaxAssistant = location.pathname === '/tax-assistant' || location.pathname === '/api-key-setup';
+  const isAuthPage = location.pathname === '/tax-assistant' || 
+                    location.pathname === '/api-key-setup' || 
+                    location.pathname === '/profile';
 
   return (
     <div className="flex flex-col min-h-screen overflow-x-hidden">
-      {!isTaxAssistant && <Navbar />}
+      {!isAuthPage && <Navbar />}
       <main className="flex-grow">
         <Routes>
           <Route path="/" element={
@@ -91,10 +94,15 @@ const AppContent = () => {
               <ApiKeySetup onComplete={() => null} />
             </ProtectedRoute>
           } />
+          <Route path="/profile" element={
+            <ProtectedRoute>
+              <UserProfile />
+            </ProtectedRoute>
+          } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      {!isTaxAssistant && (
+      {!isAuthPage && (
         <>
           <Footer />
           <WhatsAppButton />
