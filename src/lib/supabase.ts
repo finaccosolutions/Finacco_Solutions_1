@@ -12,7 +12,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storageKey: 'supabase.auth.token',
-    storage: window.localStorage
+    flowType: 'pkce',
+    storage: window.localStorage,
+    // Add custom mappings for your user table
+    multiTab: false, // Helps prevent sync issues
+    debug: true // Enable for troubleshooting
+  },
+  db: {
+    schema: 'public' // Ensure we're using the public schema
   }
 });

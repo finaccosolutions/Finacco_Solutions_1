@@ -12,12 +12,19 @@ import Auth from './components/Auth';
 import ApiKeySetup from './components/ApiKeySetup';
 import { supabase } from './lib/supabase';
 
+import DocumentTemplates from './pages/DocumentTemplates';
+import CreateDocument from './pages/CreateDocument';
+import DocumentTemplatesAdmin from './pages/admin/DocumentTemplatesAdmin';
+
+
 interface ProtectedRouteProps {
   children: React.ReactNode;
+  adminOnly?: boolean;
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, adminOnly = false }) => {
   const [isAuthenticated, setIsAuthenticated] = React.useState<boolean | null>(null);
+  const [isAdmin, setIsAdmin] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const location = useLocation();
 
@@ -30,6 +37,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
           setIsAuthenticated(false);
         } else {
           setIsAuthenticated(!!session);
+          // Check if user is admin
+          if (session?.user?.email?.endsWith('@finaccosolutions.com')) {
+            setIsAdmin(true);
+          }
         }
       } catch (err) {
         console.error('Error in auth check:', err);
@@ -41,8 +52,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     
     checkAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAuthenticated(!!session);
+      if (session?.user?.email?.endsWith('@finaccosolutions.com')) {
+        setIsAdmin(true);
+      }
       setIsLoading(false);
     });
 
@@ -61,57 +75,64 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     return <Auth onAuthSuccess={() => setIsAuthenticated(true)} returnUrl={location.pathname} />;
   }
 
+  if (adminOnly && !isAdmin) {
+    return <Navigate to="/" replace />;
+  }
+
   return <>{children}</>;
 };
 
-const AppContent = () => {
-  const location = useLocation();
-  const isTaxAssistant = location.pathname === '/tax-assistant' || location.pathname === '/api-key-setup';
-
-  return (
-    <div className="flex flex-col min-h-screen overflow-x-hidden">
-      {!isTaxAssistant && <Navbar />}
-      <main className="flex-grow">
-        <Routes>
-          <Route path="/" element={
-            <div className="flex flex-col">
-              <Hero />
-              <Services />
-              <About />
-              <Contact />
-            </div>
-          } />
-          <Route path="/tax-assistant" element={
-            <ProtectedRoute>
-              <TaxAssistant />
-            </ProtectedRoute>
-          } />
-          <Route path="/api-key-setup" element={
-            <ProtectedRoute>
-              <ApiKeySetup onComplete={() => null} />
-            </ProtectedRoute>
-          } />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-      {!isTaxAssistant && (
-        <>
-          <Footer />
-          <WhatsAppButton />
-        </>
-      )}
-    </div>
-  );
-};
-
 function App() {
-  React.useEffect(() => {
+  useEffect(() => {
     document.title = 'Finacco Solutions | Financial & Tech Services';
   }, []);
 
   return (
     <Router>
-      <AppContent />
+      <Routes>
+        <Route path="/" element={
+          <>
+            <Navbar />
+            <Hero />
+            <Services />
+            <About />
+            <Contact />
+            <Footer />
+            <WhatsAppButton />
+          </>
+        } />
+        <Route path="/tax-assistant" element={
+          <ProtectedRoute>
+            <TaxAssistant />
+          </ProtectedRoute>
+        } />
+        <Route path="/api-key-setup" element={
+          <ProtectedRoute>
+            <ApiKeySetup onComplete={() => null} />
+          </ProtectedRoute>
+        } />
+        <Route path="/documents" element={
+          <ProtectedRoute>
+            <DocumentTemplates />
+          </ProtectedRoute>
+        } />
+        <Route path="/create-document/:templateId" element={
+          <ProtectedRoute>
+            <CreateDocument />
+          </ProtectedRoute>
+        } />
+        <Route path="/admin/templates" element={
+          <ProtectedRoute adminOnly>
+            <DocumentTemplatesAdmin />
+          </ProtectedRoute>
+        } />
+        <Route path="/tax-assistant" element={
+            <ProtectedRoute>
+              <TaxAssistant />
+            </ProtectedRoute>
+          } />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </Router>
   );
 }

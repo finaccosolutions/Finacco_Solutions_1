@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, UserPlus, LogIn, Home, RefreshCw } from 'lucide-react';
+import { Mail, Lock, UserPlus, LogIn, Home, RefreshCw, User, Phone, Key, Repeat } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ApiKeySetup from './ApiKeySetup';
 import { supabase } from '../lib/supabase';
@@ -14,13 +14,20 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, returnUrl }) => {
   const [isResetPassword, setIsResetPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [mobile, setMobile] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showApiKeySetup, setShowApiKeySetup] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null);
 
+
+  // Enhanced validation functions
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email) {
@@ -40,11 +47,20 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, returnUrl }) => {
       setPasswordError('Password is required');
       return false;
     }
-    if (!isLogin && password.length < 6) {
+    if (password.length < 6) {
       setPasswordError('Password must be at least 6 characters long');
       return false;
     }
     setPasswordError(null);
+    return true;
+  };
+
+  const validateConfirmPassword = (confirm: string): boolean => {
+    if (!isLogin && password !== confirm) {
+      setConfirmPasswordError('Passwords do not match');
+      return false;
+    }
+    setConfirmPasswordError(null);
     return true;
   };
 
@@ -68,12 +84,27 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, returnUrl }) => {
 
       setSuccess('Password reset instructions have been sent to your email');
     } catch (error) {
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('Failed to send password reset email');
-      }
+      setError(error instanceof Error ? error.message : 'Failed to send password reset email');
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+
+      if (error) throw error;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Google login failed');
       setLoading(false);
     }
   };
@@ -83,88 +114,103 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, returnUrl }) => {
     setError(null);
     setSuccess(null);
     
-    // Validate both fields before proceeding
+    // Validate all fields
     const isEmailValid = validateEmail(email);
     const isPasswordValid = validatePassword(password);
-    
-    if (!isEmailValid || !isPasswordValid) {
+    const isConfirmValid = !isLogin ? validateConfirmPassword(confirmPassword) : true;
+  
+    if (!isEmailValid || !isPasswordValid || !isConfirmValid) {
       return;
     }
-
+  
     setLoading(true);
-
+  
     try {
-      let authResponse;
-      
       if (isLogin) {
-        authResponse = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
-
-        if (authResponse.error) {
-          if (authResponse.error.message.includes('Invalid login credentials')) {
-            throw new Error(
-              'The email or password you entered is incorrect. Please try again or click "Forgot your password?" below to reset it.'
-            );
-          }
-          throw authResponse.error;
+        // LOGIN FLOW - Using raw SQL since standard auth won't work
+        const { data, error } = await supabase
+          .from('auth.users')
+          .select('*')
+          .eq('Email', email.trim())
+          .single();
+  
+        if (error || !data) {
+          throw new Error('Invalid login credentials');
         }
+  
+        // Verify password (in a real app, compare hashed passwords)
+        if (data.password !== password) { // WARNING: Insecure in production
+          throw new Error('Invalid login credentials');
+        }
+  
+        // Manually create session
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: 'custom_' + data.UID, // Simplified token
+          refresh_token: 'custom_' + data.UID
+        });
+  
+        if (sessionError) throw sessionError;
+  
+        onAuthSuccess();
       } else {
-        // Handle sign up
-        authResponse = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`
-          }
+        // SIGNUP FLOW
+        console.log('Starting signup process...');
+        
+        // 1. Create user directly in your custom table
+        const { data, error } = await supabase
+          .from('auth.users')
+          .insert([
+            {
+              UID: generateUUID(), // You need to implement this
+              Email: email.trim(),
+              "Display name": fullName.trim(),
+              Phone: mobile.trim(),
+              Providers: 'email',
+              "Provider Type": 'email',
+              "Created at": new Date().toISOString(),
+              "Last sign in": new Date().toISOString(),
+              password: password // WARNING: Store hashed passwords in production
+            }
+          ])
+          .select();
+  
+        if (error) {
+          console.error('Signup error:', error);
+          throw error;
+        }
+  
+        console.log('User created:', data);
+  
+        // 2. Manually create session
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: 'custom_' + data[0].UID,
+          refresh_token: 'custom_' + data[0].UID
         });
-
-        if (authResponse.error) {
-          if (authResponse.error.message.includes('User already registered')) {
-            throw new Error('An account with this email already exists. Please sign in instead.');
-          }
-          throw authResponse.error;
-        }
-
-        // Check if email confirmation is required
-        if (authResponse.data?.user?.identities?.length === 0) {
-          setSuccess('Please check your email for a confirmation link to complete your registration.');
-          setLoading(false);
-          return;
-        }
+  
+        if (sessionError) throw sessionError;
+  
+        setSuccess('Registration successful! Redirecting...');
+        setShowApiKeySetup(true);
       }
-
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) {
-        throw sessionError;
-      }
-
-      if (!session && !isLogin) {
-        setSuccess('Registration successful! Please check your email to verify your account.');
-        setLoading(false);
-        return;
-      }
-
-      if (!session) {
-        throw new Error('No valid session after authentication. Please try again.');
-      }
-
-      setShowApiKeySetup(true);
     } catch (error) {
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('An unexpected error occurred. Please try again.');
-      }
+      console.error('Complete error:', error);
+      setError(error instanceof Error ? 
+        error.message : 
+        'Authentication failed. Please try again.'
+      );
+    } finally {
       setLoading(false);
     }
   };
-
-  if (showApiKeySetup) {
-    return <ApiKeySetup onComplete={onAuthSuccess} returnUrl={returnUrl} />;
-  }
+  
+  // Helper function to generate UUIDs
+  const generateUUID = () => {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  };9
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-gray-50 to-white">
@@ -226,7 +272,50 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, returnUrl }) => {
                 </div>
               )}
 
-              <form onSubmit={isResetPassword ? handlePasswordReset : handleSubmit} className="space-y-6">
+              {!isResetPassword && (
+                <button
+                  onClick={handleGoogleLogin}
+                  disabled={loading}
+                  className="w-full flex justify-center items-center py-3 px-4 mb-4 border border-gray-300 rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 text-base font-medium transition-all duration-300"
+                >
+                  <img 
+                    src="https://www.google.com/favicon.ico" 
+                    alt="Google" 
+                    className="w-5 h-5 mr-2"
+                  />
+                  Continue with Google
+                </button>
+              )}
+
+              <div className="relative flex items-center my-6">
+                <div className="flex-grow border-t border-gray-300"></div>
+                <span className="flex-shrink mx-4 text-gray-500">or</span>
+                <div className="flex-grow border-t border-gray-300"></div>
+              </div>
+
+              <form onSubmit={isResetPassword ? handlePasswordReset : handleSubmit} className="space-y-4">
+                    {!isLogin && !isResetPassword && (
+                      <div>
+                        <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-2">
+                          Full Name
+                        </label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <User className="h-5 w-5 text-gray-400" />
+                          </div>
+                          <input
+                            id="fullName"
+                            type="text"
+                            required
+                            value={fullName}
+                            onChange={(e) => setFullName(e.target.value)}
+                            className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base transition-all duration-300"
+                            placeholder="Enter your full name"
+                          />
+                        </div>
+                      </div>
+                    )}
+
                 <div>
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
                     Email Address
@@ -257,34 +346,104 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, returnUrl }) => {
                 </div>
 
                 {!isResetPassword && (
-                  <div>
-                    <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                      Password
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Lock className="h-5 w-5 text-gray-400" />
+                  <>
+                    <div>
+                      <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                        Password
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <Key className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <input
+                          id="password"
+                          type="password"
+                          required
+                          value={password}
+                          onChange={(e) => {
+                            setPassword(e.target.value);
+                            validatePassword(e.target.value);
+                          }}
+                          onBlur={() => validatePassword(password)}
+                          className={`block w-full pl-10 pr-3 py-3 border ${
+                            passwordError ? 'border-red-500' : 'border-gray-300'
+                          } rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base transition-all duration-300`}
+                          placeholder="Enter your password"
+                        />
                       </div>
-                      <input
-                        id="password"
-                        type="password"
-                        required
-                        value={password}
-                        onChange={(e) => {
-                          setPassword(e.target.value);
-                          validatePassword(e.target.value);
-                        }}
-                        onBlur={() => validatePassword(password)}
-                        className={`block w-full pl-10 pr-3 py-3 border ${
-                          passwordError ? 'border-red-500' : 'border-gray-300'
-                        } rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base transition-all duration-300`}
-                        placeholder="Enter your password"
-                      />
+                      {passwordError && (
+                        <p className="mt-1 text-sm text-red-600">{passwordError}</p>
+                      )}
                     </div>
-                    {passwordError && (
-                      <p className="mt-1 text-sm text-red-600">{passwordError}</p>
+
+                    {!isLogin && (
+                      <div>
+                        <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
+                          Confirm Password
+                        </label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Repeat className="h-5 w-5 text-gray-400" />
+                          </div>
+                          <input
+                            id="confirmPassword"
+                            type="password"
+                            required
+                            value={confirmPassword}
+                            onChange={(e) => {
+                              setConfirmPassword(e.target.value);
+                              validateConfirmPassword(e.target.value);
+                            }}
+                            onBlur={() => validateConfirmPassword(confirmPassword)}
+                            className={`block w-full pl-10 pr-3 py-3 border ${
+                              confirmPasswordError ? 'border-red-500' : 'border-gray-300'
+                            } rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base transition-all duration-300`}
+                            placeholder="Confirm your password"
+                          />
+                        </div>
+                        {confirmPasswordError && (
+                          <p className="mt-1 text-sm text-red-600">{confirmPasswordError}</p>
+                        )}
+                      </div>
                     )}
-                  </div>
+
+                    {!isLogin && (
+                      <div>
+                        <label htmlFor="mobile" className="block text-sm font-medium text-gray-700 mb-2">
+                          Mobile Number (Optional)
+                        </label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Phone className="h-5 w-5 text-gray-400" />
+                          </div>
+                          <input
+                            id="mobile"
+                            type="tel"
+                            value={mobile}
+                            onChange={(e) => setMobile(e.target.value)}
+                            className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base transition-all duration-300"
+                            placeholder="Enter your mobile number"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Admin registration toggle (only show on signup in development) */}
+                    {!isLogin && process.env.NODE_ENV === 'development' && (
+                      <div className="flex items-center">
+                        <input
+                          id="isAdmin"
+                          type="checkbox"
+                          checked={isAdmin}
+                          onChange={(e) => setIsAdmin(e.target.checked)}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <label htmlFor="isAdmin" className="ml-2 block text-sm text-gray-700">
+                          Register as Admin (Development Only)
+                        </label>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 <button
@@ -329,6 +488,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, returnUrl }) => {
                         setError(null);
                         setEmailError(null);
                         setPasswordError(null);
+                        setConfirmPasswordError(null);
                       }}
                       className="text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors duration-300"
                     >

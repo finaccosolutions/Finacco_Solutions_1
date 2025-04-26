@@ -2,14 +2,10 @@
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
-    extend: {
-      minHeight: {
-        screen: ['100vh', '100dvh'],
-      },
-    },
+    extend: {},
   },
   plugins: [
-    require('@tailwindcss/typography'),
     require('@tailwindcss/forms'),
+    require('@tailwindcss/typography'),
   ],
 };
