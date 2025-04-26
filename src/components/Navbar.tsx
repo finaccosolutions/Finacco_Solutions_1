@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Menu, X, Brain, LogIn, UserPlus, LogOut, User, ChevronDown } from 'lucide-react';
+import { Menu, X, Brain, LogIn, UserPlus, LogOut, User, ChevronDown, Settings } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
 import Logo from './Logo';
-import Auth from './Auth';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -24,20 +23,41 @@ const Navbar: React.FC = () => {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [isLogin, setIsLogin] = useState(true);
+  const [userProfile, setUserProfile] = useState<any>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);
+
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        
+        setUserProfile(profile);
+      }
     };
     
     checkUser();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       setUser(session?.user ?? null);
+      
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        
+        setUserProfile(profile);
+      } else {
+        setUserProfile(null);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -87,11 +107,6 @@ const Navbar: React.FC = () => {
     }
   };
 
-  const handleAuthSuccess = () => {
-    setShowAuthModal(false);
-    setShowAccountMenu(false);
-  };
-
   const AccountMenu = () => (
     <div 
       ref={accountMenuRef}
@@ -102,7 +117,7 @@ const Navbar: React.FC = () => {
         className="flex items-center gap-2 text-gray-100 hover:text-white font-medium transition-all duration-300 relative group px-4 py-2 rounded-lg hover:bg-white/10"
       >
         <User size={20} />
-        <span>Account</span>
+        <span>{userProfile?.full_name || 'Account'}</span>
         <ChevronDown size={16} className={`transition-transform duration-300 ${showAccountMenu ? 'rotate-180' : ''}`} />
       </button>
 
@@ -111,9 +126,17 @@ const Navbar: React.FC = () => {
           {user ? (
             <>
               <div className="px-4 py-2 border-b border-gray-100">
-                <p className="text-sm font-medium text-gray-900 truncate">{user.email}</p>
-                <p className="text-xs text-gray-500">Signed in</p>
+                <p className="text-sm font-medium text-gray-900 truncate">{userProfile?.full_name}</p>
+                <p className="text-xs text-gray-500">{user.email}</p>
               </div>
+              <Link
+                to="/profile"
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                onClick={() => setShowAccountMenu(false)}
+              >
+                <Settings size={16} />
+                <span>Account Settings</span>
+              </Link>
               <button
                 onClick={handleSignOut}
                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
@@ -126,7 +149,6 @@ const Navbar: React.FC = () => {
             <>
               <button
                 onClick={() => {
-                  setIsLogin(true);
                   navigate('/tax-assistant');
                   setShowAccountMenu(false);
                 }}
@@ -137,7 +159,6 @@ const Navbar: React.FC = () => {
               </button>
               <button
                 onClick={() => {
-                  setIsLogin(false);
                   navigate('/tax-assistant');
                   setShowAccountMenu(false);
                 }}
@@ -239,9 +260,17 @@ const Navbar: React.FC = () => {
           {user ? (
             <>
               <div className="px-4 py-2 border-t border-white/10">
-                <p className="text-sm font-medium text-white truncate">{user.email}</p>
-                <p className="text-xs text-white/70">Signed in</p>
+                <p className="text-sm font-medium text-white truncate">{userProfile?.full_name}</p>
+                <p className="text-xs text-white/70">{user.email}</p>
               </div>
+              <Link
+                to="/profile"
+                className="flex items-center space-x-2 text-xl text-gray-100 hover:text-white font-medium transition-all duration-300 transform hover:translate-x-2 hover:bg-white/10 px-4 py-2 rounded-lg"
+                onClick={() => setIsOpen(false)}
+              >
+                <Settings size={24} />
+                <span>Account Settings</span>
+              </Link>
               <button
                 onClick={() => {
                   handleSignOut();

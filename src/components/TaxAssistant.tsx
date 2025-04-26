@@ -7,7 +7,10 @@ import Auth from './Auth';
 import ApiKeySetup from './ApiKeySetup';
 import { supabase } from '../lib/supabase';
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> cb6bd4a3db4a643ea48452c178509de166f6496d
 const documentStyles = `
   .document-container {
     font-family: 'Noto Sans', Arial, sans-serif;
@@ -437,6 +440,7 @@ const TaxAssistant: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
+<<<<<<< HEAD
   e.preventDefault();
   
   if (!input.trim() || isLoading) return;
@@ -467,14 +471,38 @@ const TaxAssistant: React.FC = () => {
 
     // Then check if it's a generic document request
     const isDocRequest = await checkIfDocumentRequest(input);
+=======
+    e.preventDefault();
+>>>>>>> cb6bd4a3db4a643ea48452c178509de166f6496d
     
-    if (isDocRequest) {
-      setIsDocumentMode(true);
-      await handleDocumentRequest(input);
-      setIsLoading(false);
-      return;
-    }
+    if (!input.trim() || isLoading) return;
+    
+    setIsLoading(true);
+    setError(null);
 
+<<<<<<< HEAD
+=======
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input,
+      timestamp: new Date().toISOString()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+
+    try {
+      const isDocRequest = await checkIfDocumentRequest(input);
+      
+      if (isDocRequest) {
+        setIsDocumentMode(true);
+        await handleDocumentRequest(input);
+        setIsLoading(false);
+        return;
+      }
+
+>>>>>>> cb6bd4a3db4a643ea48452c178509de166f6496d
       const typingMessageId = Date.now().toString();
       setTypingMessage({
         id: typingMessageId,
@@ -542,6 +570,7 @@ const TaxAssistant: React.FC = () => {
     }
   };
 
+<<<<<<< HEAD
   const checkForPredefinedDocument = async (query: string): Promise<{ templateId: string, templateName: string } | null> => {
     try {
       const { data: templates, error } = await supabase
@@ -570,6 +599,8 @@ const TaxAssistant: React.FC = () => {
     }
   };
 
+=======
+>>>>>>> cb6bd4a3db4a643ea48452c178509de166f6496d
   const checkIfDocumentRequest = async (text: string): Promise<boolean> => {
     try {
       const response = await fetch(
@@ -805,7 +836,10 @@ const TaxAssistant: React.FC = () => {
       throw new Error("Failed to generate document. Please try again.");
     }
   };
+<<<<<<< HEAD
   
+=======
+>>>>>>> cb6bd4a3db4a643ea48452c178509de166f6496d
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1589,7 +1623,11 @@ const TaxAssistant: React.FC = () => {
       </button>
     </div>
     <div className="mt-2 flex justify-center gap-2">
+<<<<<<< HEAD
       <span className="text-xs text-gray-500">Try: "Draft a rental agreement" or "Explain GST rates in India"</span>
+=======
+      <span className="text-xs text-gray-500">Try: "Draft" for Draft any Document or ask any question</span>
+>>>>>>> cb6bd4a3db4a643ea48452c178509de166f6496d
     </div>
   </div>
 </form>

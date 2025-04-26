@@ -10,6 +10,7 @@ import WhatsAppButton from './components/WhatsAppButton';
 import TaxAssistant from './components/TaxAssistant';
 import Auth from './components/Auth';
 import ApiKeySetup from './components/ApiKeySetup';
+import UserProfile from './components/UserProfile';
 import { supabase } from './lib/supabase';
 
 import DocumentTemplates from './pages/DocumentTemplates';
@@ -82,6 +83,56 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, adminOnly = f
   return <>{children}</>;
 };
 
+<<<<<<< HEAD
+=======
+const AppContent = () => {
+  const location = useLocation();
+  const isAuthPage = location.pathname === '/tax-assistant' || 
+                    location.pathname === '/api-key-setup' || 
+                    location.pathname === '/profile';
+
+  return (
+    <div className="flex flex-col min-h-screen overflow-x-hidden">
+      {!isAuthPage && <Navbar />}
+      <main className="flex-grow">
+        <Routes>
+          <Route path="/" element={
+            <div className="flex flex-col">
+              <Hero />
+              <Services />
+              <About />
+              <Contact />
+            </div>
+          } />
+          <Route path="/tax-assistant" element={
+            <ProtectedRoute>
+              <TaxAssistant />
+            </ProtectedRoute>
+          } />
+          <Route path="/api-key-setup" element={
+            <ProtectedRoute>
+              <ApiKeySetup onComplete={() => null} />
+            </ProtectedRoute>
+          } />
+          <Route path="/profile" element={
+            <ProtectedRoute>
+              <UserProfile />
+            </ProtectedRoute>
+          } />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+      {!isAuthPage && (
+        <>
+          <Footer />
+          <WhatsAppButton />
+        </>
+      )}
+    </div>
+  );
+};
+
+>>>>>>> cb6bd4a3db4a643ea48452c178509de166f6496d
 function App() {
   useEffect(() => {
     document.title = 'Finacco Solutions | Financial & Tech Services';
